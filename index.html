@@ -40,6 +40,7 @@
   .dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:8px; vertical-align:middle; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px; }
   .chart-wrap { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:20px; margin-bottom:16px; }
+  .chart-wrap canvas { max-height:320px; }
   .chart-wrap h3 { font-size:14px; font-weight:600; margin-bottom:16px; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .spinner { width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--how); border-radius:50%; animation:spin 0.7s linear infinite; display:inline-block; vertical-align:middle; margin-right:6px; }
@@ -121,8 +122,8 @@
         <button class="ftoggle active" data-fac="dd"  style="--fc:#ec4899" onclick="toggleFac(this)">Don Doggos</button>
       </div>
     </div>
-    <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart" height="300"></canvas></div>
-    <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart" height="300"></canvas></div>
+    <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart"></canvas></div>
+    <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart"></canvas></div>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -275,6 +276,7 @@ async function loadTrends() {
     },
     options:{
       responsive:true,
+      maintainAspectRatio:false,
       plugins:{
         legend:{ labels:{color:'#e2e8f0',padding:16} },
         datalabels:{ display:false }
@@ -302,6 +304,7 @@ async function loadTrends() {
     data:{ labels:pmL, datasets:[{ data:pmD, backgroundColor:pmC, borderColor:'#1a1d27', borderWidth:2 }] },
     options:{
       responsive:true,
+      maintainAspectRatio:false,
       plugins:{
         legend:{ labels:{color:'#e2e8f0',padding:16,font:{size:13}} },
         tooltip:{ callbacks:{ label:ctx=>' '+ctx.label+': $'+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:2}) } },
