@@ -1,6 +1,6 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
-// Filters by PAYMENT DATE (transaction_time), not reservation date.
-// Deposits are stored in tx.deposits / tx.deposit, separate from tx.payment_items.
+// Filters by PAYMENT DATE, not reservation date.
+// Deposits live in tx.deposits / tx.deposit, separate from tx.payment_items.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -79,6 +79,7 @@ function categorize(item) {
   if (type === 'cash') return 'cash';
   if (type === 'check') return 'check';
   if (type === 'store credit' || type === 'account credit') return 'store_credit';
+  if (type.includes('admin') || type.includes('comped') || type.includes('credit comped')) return 'store_credit';
   if (proc === 'cardconnect') return 'cardconnect';
   if (proc === 'helcim') return 'helcim';
   if (proc === 'stripe') return 'gingr_payments';
@@ -86,27 +87,29 @@ function categorize(item) {
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
   if (type === 'credit card') return 'credit_card';
-  if (type === 'admin' || type.includes('admin')) return 'store_credit';
   return 'other';
 }
 
-// Normalize a deposit record to match the payment_item shape expected by categorize().
-// IMPORTANT: We use consumed_at (when applied at checkout) OR created_at (when collected).
-// We do NOT use check_out_stamp — that's the reservation checkout time, not a payment date.
-// Deposits with check_out_stamp but no consumed_at were collected at an unknown past date;
-// they should appear on that past date's EOD, not today's.
+// Normalize a deposit record to the payment_item shape expected by categorize().
+//
+// CRITICAL: We only use created_at (when the deposit was COLLECTED from the client).
+// - consumed_at = when applied at checkout. For Gingr Payments (Stripe), the corresponding
+//   charge is already tracked in payment_items — using consumed_at would double-count.
+// - check_out_stamp = reservation checkout time, not a payment date — never use it.
+//
+// Gingr's "Collected Deposits" in the EOD report = deposits with created_at = today.
 function normalizeDeposit(dep) {
-  const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
   // Skip cancelled or forfeited deposits
   if (dep.cancel_stamp || dep.forfeited_at) return null;
+  // Skip deposits with no collection date (can't assign to a day)
+  if (!dep.created_at) return null;
+  const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
   return {
     payment_method_type: dep.payment_method || dep.payment_method_type || dep.type || '',
     processor: dep.processor || null,
     total_balance: dep.deposit_amount || dep.paid_amount || dep.amount || dep.total_balance || '0',
     zero_payment: '0',
-    // Use consumed_at (applied at checkout) first, then created_at (when collected).
-    // Do NOT use check_out_stamp — it is the reservation checkout date, not payment date.
-    transaction_time: dep.consumed_at || dep.created_at || null,
+    transaction_time: dep.created_at,
     payment_allocation_refund: isRefund ? '1' : '0',
   };
 }
@@ -203,39 +206,53 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // Debug: dump all deposits whose consumed_at OR created_at matches the target date.
-    // Includes raw fields to diagnose categorization and date issues.
-    let allMatchingDeposits = [];
+    // Debug: show matched deposits and any Helcim payment_items with their raw dates
+    let debugInfo = {};
     if (isDebug) {
+      const matchingDeposits = [];
+      const helcimPaymentItems = [];
+
       for (const tx of transactions) {
+        // Deposits
         const src = tx?.deposits || tx?.deposit;
-        if (!src) continue;
-        const deps = Array.isArray(src) ? src : Object.values(src);
-        for (const d of deps) {
-          const consumed = d.consumed_at ? tsToPacificDate(d.consumed_at) : null;
-          const created  = d.created_at  ? tsToPacificDate(d.created_at)  : null;
-          const checkout = d.check_out_stamp ? tsToPacificDate(d.check_out_stamp) : null;
-          if (consumed !== from_date && created !== from_date && checkout !== from_date) continue;
-          allMatchingDeposits.push({
-            id: d.id,
-            payment_id: d.payment_id,
-            amount: d.deposit_amount,
-            method: d.payment_method,
-            processor: d.processor,
-            consumed_at_date: consumed,
-            created_at_date: created,
-            check_out_stamp_date: checkout,
-            cancel_stamp: d.cancel_stamp || null,
-            forfeited_at: d.forfeited_at || null,
-            refund_amount: d.refund_amount || null,
-            status: d.status || null,
-          });
+        if (src) {
+          const deps = Array.isArray(src) ? src : Object.values(src);
+          for (const d of deps) {
+            const createdDate = d.created_at ? tsToPacificDate(d.created_at) : null;
+            const consumedDate = d.consumed_at ? tsToPacificDate(d.consumed_at) : null;
+            const checkoutDate = d.check_out_stamp ? tsToPacificDate(d.check_out_stamp) : null;
+            if (createdDate !== from_date && consumedDate !== from_date && checkoutDate !== from_date) continue;
+            matchingDeposits.push({
+              id: d.id, payment_id: d.payment_id,
+              amount: d.deposit_amount, method: d.payment_method,
+              created_at_date: createdDate, consumed_at_date: consumedDate,
+              check_out_stamp_date: checkoutDate,
+              cancel_stamp: d.cancel_stamp || null,
+              forfeited_at: d.forfeited_at || null,
+              refund_amount: d.refund_amount || null,
+              counted: createdDate === from_date && !d.cancel_stamp && !d.forfeited_at && !!d.created_at,
+            });
+          }
+        }
+        // Helcim payment_items — all dates, to find the missing $45
+        if (tx?.payment_items) {
+          for (const [key, item] of Object.entries(tx.payment_items)) {
+            const type = (item.payment_method_type || '').toLowerCase();
+            const proc = (item.processor || '').toLowerCase();
+            if (!type.includes('helcim') && proc !== 'helcim') continue;
+            const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
+            helcimPaymentItems.push({
+              key,
+              amount: item.total_balance,
+              type: item.payment_method_type,
+              proc: item.processor,
+              date: ts ? tsToPacificDate(ts) : null,
+              isRefund: item.payment_allocation_refund,
+            });
+          }
         }
       }
-      // Flag duplicates
-      const seen = {};
-      for (const d of allMatchingDeposits) seen[d.id] = (seen[d.id] || 0) + 1;
-      allMatchingDeposits = allMatchingDeposits.map(d => ({ ...d, times_seen: seen[d.id] }));
+      debugInfo = { matchingDeposits, helcimPaymentItems };
     }
 
     return res.status(200).json({
@@ -245,7 +262,7 @@ module.exports = async function handler(req, res) {
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
-      ...(isDebug ? { allMatchingDeposits } : {}),
+      ...debugInfo,
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
