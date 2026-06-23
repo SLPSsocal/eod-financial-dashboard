@@ -230,38 +230,19 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // Debug: collect deposit payment_ids and skipped Helcim items
+    // Debug: find the tx containing Helcim key 6010 and dump its top-level fields + dates
     let debugOut = {};
     if (req.query.debug === 'true') {
-      const skippedHelcim = [];
-      const allDepositPaymentIds = [];
+      let txSample = null;
       for (const tx of transactions) {
-        const checkoutDate = tx.check_out_stamp ? tsToPacificDate(tx.check_out_stamp) : null;
-        const depSrc = tx.deposits || tx.deposit;
-        const depIds = new Set();
-        if (depSrc) {
-          const deps = Array.isArray(depSrc) ? depSrc : Object.values(depSrc);
-          for (const d of deps) {
-            if (d.payment_id) {
-              depIds.add(String(d.payment_id));
-              allDepositPaymentIds.push({ dep_id: d.id, payment_id: d.payment_id, method: d.payment_method, amount: d.deposit_amount, created: d.created_at ? tsToPacificDate(d.created_at) : null });
-            }
-          }
-        }
-        if (tx.payment_items) {
-          for (const [key, item] of Object.entries(tx.payment_items)) {
-            const type = (item.payment_method_type || '').toLowerCase();
-            const proc = (item.processor || '').toLowerCase();
-            if (!type.includes('helcim') && proc !== 'helcim') continue;
-            const ts = parseInt(item.transaction_time || 0, 10);
-            skippedHelcim.push({
-              key, amount: item.total_balance, date: ts ? tsToPacificDate(ts) : null,
-              checkoutDate, excluded_by_dedup: depIds.has(key),
-            });
-          }
-        }
+        if (tx?.payment_items?.['6010']) { txSample = tx; break; }
       }
-      debugOut = { skippedHelcim: skippedHelcim.filter(h => h.excluded_by_dedup || h.date !== from_date), allDepositPaymentIds };
+      const txFields = txSample ? Object.keys(txSample).reduce((acc, k) => {
+        const v = txSample[k];
+        if (typeof v !== 'object' || v === null) acc[k] = v;
+        return acc;
+      }, {}) : 'not found';
+      debugOut = { tx_6010_fields: txFields };
     }
 
     return res.status(200).json({
