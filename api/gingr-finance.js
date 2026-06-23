@@ -86,41 +86,43 @@ function categorize(item) {
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
   if (type === 'credit card') return 'credit_card';
+  if (type === 'admin' || type.includes('admin')) return 'store_credit';
   return 'other';
 }
 
 // Normalize a deposit record to match the payment_item shape expected by categorize().
-// Actual Gingr deposit fields (from debug):
-//   deposit_amount: dollar amount, consumed_at: Unix ts when applied at checkout,
-//   payment_method: e.g. "Gingr Payments" or "Helcim", refund_amount: refund if any
+// IMPORTANT: We use consumed_at (when applied at checkout) OR created_at (when collected).
+// We do NOT use check_out_stamp — that's the reservation checkout time, not a payment date.
+// Deposits with check_out_stamp but no consumed_at were collected at an unknown past date;
+// they should appear on that past date's EOD, not today's.
 function normalizeDeposit(dep) {
   const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
+  // Skip cancelled or forfeited deposits
+  if (dep.cancel_stamp || dep.forfeited_at) return null;
   return {
     payment_method_type: dep.payment_method || dep.payment_method_type || dep.type || '',
     processor: dep.processor || null,
     total_balance: dep.deposit_amount || dep.paid_amount || dep.amount || dep.total_balance || '0',
     zero_payment: '0',
-    // consumed_at = when deposit was applied (checkout date) — matches Gingr EOD report date
-    transaction_time: dep.consumed_at || dep.check_out_stamp || dep.created_at || null,
+    // Use consumed_at (applied at checkout) first, then created_at (when collected).
+    // Do NOT use check_out_stamp — it is the reservation checkout date, not payment date.
+    transaction_time: dep.consumed_at || dep.created_at || null,
     payment_allocation_refund: isRefund ? '1' : '0',
   };
 }
 
 function getItemsToProcess(tx) {
   const items = [];
-
-  // Collect deposit payment_ids so we can exclude them from payment_items (they'd double-count)
   const depositPaymentIds = new Set();
   const depSrc = tx.deposits || tx.deposit;
   if (depSrc) {
     const deps = Array.isArray(depSrc) ? depSrc : Object.values(depSrc);
     for (const d of deps) {
       if (d.payment_id) depositPaymentIds.add(String(d.payment_id));
+      const normalized = normalizeDeposit(d);
+      if (normalized) items.push(normalized);
     }
-    items.push(...deps.map(normalizeDeposit));
   }
-
-  // Regular payment items — skip any whose key is a deposit payment_id
   if (tx.payment_items && typeof tx.payment_items === 'object') {
     for (const [key, item] of Object.entries(tx.payment_items)) {
       if (!depositPaymentIds.has(String(key))) {
@@ -128,7 +130,6 @@ function getItemsToProcess(tx) {
       }
     }
   }
-
   return items;
 }
 
@@ -202,36 +203,38 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // In debug mode, dump ALL deposit items that match the target date,
-    // including which deposit IDs appear more than once (cross-invoice dedup issue).
+    // Debug: dump all deposits whose consumed_at OR created_at matches the target date.
+    // Includes raw fields to diagnose categorization and date issues.
     let allMatchingDeposits = [];
     if (isDebug) {
-      const PACIFIC_OFF = -7;
-      const toDate = ts => {
-        const ms = (parseInt(ts, 10) + PACIFIC_OFF * 3600) * 1000;
-        return new Date(ms).toISOString().split('T')[0];
-      };
       for (const tx of transactions) {
         const src = tx?.deposits || tx?.deposit;
         if (!src) continue;
         const deps = Array.isArray(src) ? src : Object.values(src);
         for (const d of deps) {
-          const ts = d.consumed_at || d.check_out_stamp || d.created_at;
-          if (!ts) continue;
-          const dt = toDate(ts);
-          if (dt !== from_date) continue;
+          const consumed = d.consumed_at ? tsToPacificDate(d.consumed_at) : null;
+          const created  = d.created_at  ? tsToPacificDate(d.created_at)  : null;
+          const checkout = d.check_out_stamp ? tsToPacificDate(d.check_out_stamp) : null;
+          if (consumed !== from_date && created !== from_date && checkout !== from_date) continue;
           allMatchingDeposits.push({
-            id: d.id, payment_id: d.payment_id,
-            amount: d.deposit_amount, method: d.payment_method,
-            date_used: ts === d.consumed_at ? 'consumed_at' : ts === d.check_out_stamp ? 'check_out_stamp' : 'created_at',
+            id: d.id,
+            payment_id: d.payment_id,
+            amount: d.deposit_amount,
+            method: d.payment_method,
+            processor: d.processor,
+            consumed_at_date: consumed,
+            created_at_date: created,
+            check_out_stamp_date: checkout,
+            cancel_stamp: d.cancel_stamp || null,
+            forfeited_at: d.forfeited_at || null,
+            refund_amount: d.refund_amount || null,
+            status: d.status || null,
           });
         }
       }
-      // Flag duplicate deposit IDs
+      // Flag duplicates
       const seen = {};
-      for (const d of allMatchingDeposits) {
-        seen[d.id] = (seen[d.id] || 0) + 1;
-      }
+      for (const d of allMatchingDeposits) seen[d.id] = (seen[d.id] || 0) + 1;
       allMatchingDeposits = allMatchingDeposits.map(d => ({ ...d, times_seen: seen[d.id] }));
     }
 
