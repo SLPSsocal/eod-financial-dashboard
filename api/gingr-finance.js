@@ -37,23 +37,21 @@ module.exports = async function handler(req, res) {
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
 
-  // Test mode: probe arbitrary Gingr endpoints
+  // Test mode: probe arbitrary Gingr endpoints, return full JSON
   if (test_endpoint) {
     try {
       const params = new URLSearchParams({ key: config.key });
       if (test_id) params.set('id', test_id);
-      // Try GET first
       const url = `https://${config.subdomain}.gingrapp.com/api/v1/${test_endpoint}?${params}`;
       let r = await fetch(url, { method: 'GET' });
-      let body = await r.text();
-      // If GET 404/405, try POST
       if (!r.ok) {
         const postBody = new URLSearchParams({ key: config.key, id: test_id || '' });
         const r2 = await fetch(`https://${config.subdomain}.gingrapp.com/api/v1/${test_endpoint}`, { method: 'POST', body: postBody });
-        body = await r2.text();
-        return res.status(200).json({ method: 'POST', status: r2.status, body: body.slice(0, 2000) });
+        const data = await r2.json();
+        return res.status(200).json({ method: 'POST', status: r2.status, data });
       }
-      return res.status(200).json({ method: 'GET', status: r.status, body: body.slice(0, 2000) });
+      const data = await r.json();
+      return res.status(200).json({ method: 'GET', status: r.status, data });
     } catch (err) {
       return res.status(502).json({ success: false, error: err.message });
     }
