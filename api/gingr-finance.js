@@ -202,19 +202,37 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // In debug mode, dump raw deposit fields from first few transactions that have them
-    let rawDeposits = [];
+    // In debug mode, dump ALL deposit items that match the target date,
+    // including which deposit IDs appear more than once (cross-invoice dedup issue).
+    let allMatchingDeposits = [];
     if (isDebug) {
+      const PACIFIC_OFF = -7;
+      const toDate = ts => {
+        const ms = (parseInt(ts, 10) + PACIFIC_OFF * 3600) * 1000;
+        return new Date(ms).toISOString().split('T')[0];
+      };
       for (const tx of transactions) {
         const src = tx?.deposits || tx?.deposit;
-        if (src) {
-          const items = Array.isArray(src) ? src : Object.values(src);
-          if (items.length > 0) {
-            rawDeposits.push({ tx_keys: Object.keys(tx), deposit_items: items.slice(0, 3) });
-            if (rawDeposits.length >= 3) break;
-          }
+        if (!src) continue;
+        const deps = Array.isArray(src) ? src : Object.values(src);
+        for (const d of deps) {
+          const ts = d.consumed_at || d.check_out_stamp || d.created_at;
+          if (!ts) continue;
+          const dt = toDate(ts);
+          if (dt !== from_date) continue;
+          allMatchingDeposits.push({
+            id: d.id, payment_id: d.payment_id,
+            amount: d.deposit_amount, method: d.payment_method,
+            date_used: ts === d.consumed_at ? 'consumed_at' : ts === d.check_out_stamp ? 'check_out_stamp' : 'created_at',
+          });
         }
       }
+      // Flag duplicate deposit IDs
+      const seen = {};
+      for (const d of allMatchingDeposits) {
+        seen[d.id] = (seen[d.id] || 0) + 1;
+      }
+      allMatchingDeposits = allMatchingDeposits.map(d => ({ ...d, times_seen: seen[d.id] }));
     }
 
     return res.status(200).json({
@@ -224,7 +242,7 @@ module.exports = async function handler(req, res) {
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
-      ...(isDebug ? { rawDeposits } : {}),
+      ...(isDebug ? { allMatchingDeposits } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
