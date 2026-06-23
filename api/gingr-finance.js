@@ -230,7 +230,7 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // Debug: dump ALL keys/values of the tx containing Helcim key 6010 (1 level deep)
+    // Debug: inspect items[] and detailed_payments for tx containing key 6010
     let debugOut = {};
     if (req.query.debug === 'true') {
       let txSample = null;
@@ -238,19 +238,13 @@ module.exports = async function handler(req, res) {
         if (tx?.payment_items?.['6010']) { txSample = tx; break; }
       }
       if (txSample) {
-        const shallow = {};
-        for (const [k, v] of Object.entries(txSample)) {
-          if (v === null || typeof v !== 'object') {
-            shallow[k] = v;
-          } else if (Array.isArray(v)) {
-            shallow[k] = `[array len=${v.length}]`;
-          } else {
-            shallow[k] = `{keys: ${Object.keys(v).slice(0,8).join(',')}}`;
-          }
-        }
-        debugOut = { tx_6010_shallow: shallow, tx_6010_keys: Object.keys(txSample) };
+        debugOut = {
+          items: txSample.items,
+          detailed_payments: txSample.detailed_payments,
+          payment_info: txSample.payment_info,
+        };
       } else {
-        debugOut = { tx_6010_shallow: 'NOT FOUND' };
+        debugOut = { error: 'tx with key 6010 not found' };
       }
     }
 
