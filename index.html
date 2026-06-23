@@ -33,10 +33,10 @@
   .main { padding: 24px; }
   .page { display: none; }
   .page.active { display: block; }
-  .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .eod-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .eod-table th, .eod-table td { padding: 11px 18px; text-align: right; border-bottom: 1px solid var(--border); }
-  .eod-table th:first-child, .eod-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); }
+  .eod-table th, .eod-table td { padding: 11px 18px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .eod-table th:first-child, .eod-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); width: 1px; white-space: nowrap; padding-right: 28px; }
   .eod-table thead th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #12141e; padding-top: 14px; padding-bottom: 14px; }
   .eod-table thead th.col-how { color: var(--how); }
   .eod-table thead th.col-rw  { color: var(--rw); }
@@ -56,6 +56,15 @@
   .chart-wrap h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  @media (max-width: 600px) {
+    .header { padding: 12px 16px; }
+    .header h1 { font-size: 15px; }
+    .controls { padding: 12px 16px; }
+    .main { padding: 12px 16px; }
+    .eod-table th, .eod-table td { padding: 9px 12px; font-size: 13px; }
+    .eod-table th:first-child, .eod-table td:first-child { padding-right: 20px; }
+    .eod-table tfoot td { font-size: 13px; }
+  }
 </style>
 </head>
 <body>
