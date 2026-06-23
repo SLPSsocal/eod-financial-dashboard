@@ -22,7 +22,6 @@ function tsToPacificDate(ts) {
   const epochMs = (parseInt(ts, 10) + PACIFIC_OFFSET_HOURS * 3600) * 1000;
   return new Date(epochMs).toISOString().split('T')[0];
 }
-
 async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
   const all = [];
   let pageStart = 1;
@@ -61,7 +60,6 @@ async function batchFetch(subdomain, key, ids) {
   }
   return results;
 }
-
 function categorize(item) {
   const type = (item.payment_method_type || '').toLowerCase().trim();
   const proc = (item.processor || '').toLowerCase().trim();
@@ -73,16 +71,19 @@ function categorize(item) {
   if (type === 'check') return 'check';
   if (type === 'store credit' || type === 'account credit') return 'store_credit';
 
+  // Processor field takes priority
   if (proc === 'cardconnect') return 'cardconnect';
   if (proc === 'helcim') return 'helcim';
   if (proc === 'stripe') return 'gingr_payments';
 
+  // Fallback: match payment_method_type string (processor may be null)
+  if (type.includes('helcim')) return 'helcim';
+  if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
   if (type === 'credit card') return 'credit_card';
 
   return 'other';
 }
-
 function aggregate(transactions, from_date, to_date) {
   const t = {
     cardconnect: 0, helcim: 0, gingr_payments: 0,
@@ -119,7 +120,6 @@ function aggregate(transactions, from_date, to_date) {
 
   return { totals: t, matched_invoices };
 }
-
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -128,8 +128,8 @@ module.exports = async function handler(req, res) {
 
   const { facility, from_date, to_date } = req.query;
   const config = FACILITIES[facility && facility.toLowerCase()];
-  if (!config) return res.status(400).json({ success: false, error: 'Unknown facility "' + facility + '"' });
-  if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: 'Env vars not set for "' + facility + '"' });
+  if (!config) return res.status(400).json({ success: false, error: 'Unknown facility' });
+  if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: 'Env vars not set for ' + facility });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
@@ -145,11 +145,9 @@ module.exports = async function handler(req, res) {
     ) / 100;
 
     return res.status(200).json({
-      success: true,
-      facility,
+      success: true, facility,
       facilityName: config.name,
-      from_date,
-      to_date,
+      from_date, to_date,
       invoices_fetched: ids.length,
       invoice_count: matched_invoices,
       totals,
