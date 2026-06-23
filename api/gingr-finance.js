@@ -1,6 +1,5 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
 // Filters by PAYMENT DATE (transaction_time), not reservation date.
-// Two-pass invoice fetch: completed invoices (past) + all invoices (future window for deposits).
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -43,6 +42,16 @@ async function fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams =
     pageStart += PER_PAGE;
   }
   return all;
+}
+
+// Safe version: returns [] instead of throwing, so a failed future-window
+// fetch doesn't kill the entire request.
+async function fetchInvoiceIdsSafe(subdomain, key, from_date, to_date, extraParams = {}) {
+  try {
+    return await fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams);
+  } catch (_) {
+    return [];
+  }
 }
 
 async function fetchTransaction(subdomain, key, id) {
@@ -136,15 +145,15 @@ module.exports = async function handler(req, res) {
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    // Pass 1: completed invoices, -30 days to +1 day (checkouts with recent service dates)
-    // Pass 2: all invoices (including open/future), from_date to +90 days (catches deposits on upcoming reservations)
-    // Deduplicate IDs so we don't double-fetch the same invoice.
+    // Pass 1 (required): complete=true, -30 to +1 day — closed checkouts
+    // Pass 2 (optional): complete=false, today to +90 days — open invoices with deposits
+    //   Uses fetchInvoiceIdsSafe so a Gingr API error here doesn't kill the whole request.
     const [pastIds, futureIds] = await Promise.all([
       fetchInvoiceIds(config.subdomain, config.key, addDays(from_date, -30), addDays(to_date, 1), { complete: 'true' }),
-      fetchInvoiceIds(config.subdomain, config.key, from_date, addDays(to_date, 90), {}),
+      fetchInvoiceIdsSafe(config.subdomain, config.key, from_date, addDays(to_date, 90), { complete: 'false' }),
     ]);
-    const allIds = [...new Set([...pastIds, ...futureIds])];
 
+    const allIds = [...new Set([...pastIds, ...futureIds])];
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
     const { totals, matched_invoices } = aggregate(transactions, from_date, to_date);
 
@@ -159,6 +168,8 @@ module.exports = async function handler(req, res) {
       from_date,
       to_date,
       invoices_fetched: allIds.length,
+      past_ids: pastIds.length,
+      future_ids: futureIds.length,
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
