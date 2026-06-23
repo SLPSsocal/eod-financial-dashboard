@@ -1,4 +1,6 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
+// Filters by PAYMENT DATE (transaction_time), not reservation date.
+// Deposits are stored in tx.deposits / tx.deposit, separate from tx.payment_items.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -87,59 +89,71 @@ function categorize(item) {
   return 'other';
 }
 
-function aggregate(transactions, from_date, to_date, debug = false) {
+// Normalize a deposit record so it looks like a payment_item for categorize().
+// Gingr deposit fields may differ slightly from payment_item fields.
+function normalizeDeposit(dep) {
+  return {
+    payment_method_type: dep.payment_method_type || dep.type || '',
+    processor: dep.processor || null,
+    total_balance: dep.amount || dep.total_balance || dep.deposit_amount || '0',
+    zero_payment: dep.zero_payment || '0',
+    transaction_time: dep.transaction_time || dep.create_stamp || dep.date || null,
+    payment_allocation_refund: dep.refund || dep.payment_allocation_refund || '0',
+  };
+}
+
+function getItemsToProcess(tx) {
+  const items = [];
+  // Regular payment items
+  if (tx.payment_items && typeof tx.payment_items === 'object') {
+    items.push(...Object.values(tx.payment_items));
+  }
+  // Deposit items (separate field discovered via debug)
+  const depSrc = tx.deposits || tx.deposit;
+  if (depSrc) {
+    const deps = Array.isArray(depSrc) ? depSrc : Object.values(depSrc);
+    items.push(...deps.map(normalizeDeposit));
+  }
+  return items;
+}
+
+function aggregate(transactions, from_date, to_date) {
   const t = {
     cardconnect: 0, helcim: 0, gingr_payments: 0,
     cash: 0, check: 0, store_credit: 0, credit_card: 0,
     other: 0, refunds: 0,
   };
   let matched_invoices = 0;
-  const skipped = []; // items on target date that got excluded
-  const topLevelFields = new Set(); // track unexpected top-level fields on transactions
 
   for (const tx of transactions) {
     if (!tx) continue;
-    // In debug mode, capture top-level keys we haven't seen before
-    if (debug) {
-      Object.keys(tx).forEach(k => topLevelFields.add(k));
-    }
-    if (!tx.payment_items) continue;
+    const items = getItemsToProcess(tx);
     let invoiceMatched = false;
 
-    for (const item of Object.values(tx.payment_items)) {
+    for (const item of items) {
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
-      if (!ts) {
-        if (debug && parseFloat(item.total_balance || 0)) {
-          skipped.push({ reason: 'no_ts', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, zero: item.zero_payment });
-        }
-        continue;
-      }
+      if (!ts) continue;
       const payDate = tsToPacificDate(ts);
       if (payDate < from_date || payDate > to_date) continue;
 
       invoiceMatched = true;
       const amount = parseFloat(item.total_balance || 0);
-
-      if (!amount) {
-        if (debug) skipped.push({ reason: 'zero_balance', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, zero: item.zero_payment, payDate });
-        continue;
-      }
-      if (item.zero_payment === '1') {
-        if (debug) skipped.push({ reason: 'zero_payment_flag', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, payDate });
-        continue;
-      }
+      if (!amount) continue;
+      if (item.zero_payment === '1') continue;
 
       if (item.payment_allocation_refund === '1') {
         t.refunds -= amount;
         continue;
       }
+
       const cat = categorize(item);
       if (cat) t[cat] = (t[cat] || 0) + amount;
     }
+
     if (invoiceMatched) matched_invoices++;
   }
 
-  return { totals: t, matched_invoices, skipped: debug ? skipped : undefined, topLevelFields: debug ? [...topLevelFields] : undefined };
+  return { totals: t, matched_invoices };
 }
 
 module.exports = async function handler(req, res) {
@@ -148,8 +162,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date, debug } = req.query;
-  const isDebug = debug === 'true';
+  const { facility, from_date, to_date } = req.query;
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
@@ -167,7 +180,7 @@ module.exports = async function handler(req, res) {
 
     const allIds = [...new Set([...closedIds, ...openIds])];
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
-    const { totals, matched_invoices, skipped, topLevelFields } = aggregate(transactions, from_date, to_date, isDebug);
+    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date);
 
     const net_with_refunds = Math.round(
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
@@ -177,12 +190,9 @@ module.exports = async function handler(req, res) {
       success: true,
       facility, facilityName: config.name, from_date, to_date,
       invoices_fetched: allIds.length,
-      closed_ids: closedIds.length,
-      open_ids: openIds.length,
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
-      ...(isDebug ? { skipped, topLevelFields } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
