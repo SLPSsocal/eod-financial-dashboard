@@ -1,7 +1,6 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
 // Filters by PAYMENT DATE (transaction_time), not reservation date.
-// Fetches invoices from -30 to +90 days (no status filters) so deposits
-// on future/open reservations are included alongside closed checkouts.
+// Two-pass invoice fetch: completed invoices (past) + all invoices (future window for deposits).
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -12,9 +11,6 @@ const FACILITIES = {
 
 const PER_PAGE = 100;
 const CONCURRENCY = 30;
-
-// Offset for Pacific time: PDT = -7, PST = -8.
-// We use -7 year-round as a practical default; winter dates may be 1hr off near midnight.
 const PACIFIC_OFFSET_HOURS = -7;
 
 function addDays(dateStr, n) {
@@ -23,21 +19,19 @@ function addDays(dateStr, n) {
   return d.toISOString().split('T')[0];
 }
 
-// Convert a Unix timestamp to YYYY-MM-DD in Pacific time
 function tsToPacificDate(ts) {
   const epochMs = (parseInt(ts, 10) + PACIFIC_OFFSET_HOURS * 3600) * 1000;
   return new Date(epochMs).toISOString().split('T')[0];
 }
 
-async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
+async function fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams = {}) {
   const all = [];
   let pageStart = 1;
   while (true) {
-    // No complete/closed_only filters: we need ALL invoices in the window,
-    // including open future reservations that had deposits collected today.
     const params = new URLSearchParams({
       key, from_date, to_date,
       per_page: String(PER_PAGE), page: String(pageStart),
+      ...extraParams,
     });
     const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/list_invoices?${params}`);
     if (!res.ok) throw new Error(`list_invoices HTTP ${res.status}`);
@@ -80,12 +74,10 @@ function categorize(item) {
   if (type === 'check') return 'check';
   if (type === 'store credit' || type === 'account credit') return 'store_credit';
 
-  // Processor field takes priority for card payments
   if (proc === 'cardconnect') return 'cardconnect';
   if (proc === 'helcim') return 'helcim';
   if (proc === 'stripe') return 'gingr_payments';
 
-  // Fallback: check payment_method_type string (processor field may be null)
   if (type.includes('helcim')) return 'helcim';
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
@@ -107,10 +99,8 @@ function aggregate(transactions, from_date, to_date) {
     let invoiceMatched = false;
 
     for (const item of Object.values(tx.payment_items)) {
-      // Filter strictly by payment date (transaction_time in Pacific time)
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
       if (!ts) continue;
-
       const payDate = tsToPacificDate(ts);
       if (payDate < from_date || payDate > to_date) continue;
 
@@ -146,14 +136,16 @@ module.exports = async function handler(req, res) {
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    // Fetch -30 days (past checkouts) to +90 days (deposits on future reservations).
-    // No status filters so open invoices with deposits are included.
-    // Accuracy is enforced by aggregate() filtering payment_items by transaction_time.
-    const windowStart = addDays(from_date, -30);
-    const windowEnd   = addDays(to_date, 90);
+    // Pass 1: completed invoices, -30 days to +1 day (checkouts with recent service dates)
+    // Pass 2: all invoices (including open/future), from_date to +90 days (catches deposits on upcoming reservations)
+    // Deduplicate IDs so we don't double-fetch the same invoice.
+    const [pastIds, futureIds] = await Promise.all([
+      fetchInvoiceIds(config.subdomain, config.key, addDays(from_date, -30), addDays(to_date, 1), { complete: 'true' }),
+      fetchInvoiceIds(config.subdomain, config.key, from_date, addDays(to_date, 90), {}),
+    ]);
+    const allIds = [...new Set([...pastIds, ...futureIds])];
 
-    const ids = await fetchInvoiceIds(config.subdomain, config.key, windowStart, windowEnd);
-    const transactions = await batchFetch(config.subdomain, config.key, ids);
+    const transactions = await batchFetch(config.subdomain, config.key, allIds);
     const { totals, matched_invoices } = aggregate(transactions, from_date, to_date);
 
     const net_with_refunds = Math.round(
@@ -166,7 +158,7 @@ module.exports = async function handler(req, res) {
       facilityName: config.name,
       from_date,
       to_date,
-      invoices_fetched: ids.length,
+      invoices_fetched: allIds.length,
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
