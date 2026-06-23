@@ -1,7 +1,7 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
 // Filters by PAYMENT DATE (transaction_time), not reservation date.
-// Fetches invoices from -30 to +90 days to capture both checkouts (past)
-// and deposits on future reservations (open invoices).
+// Fetches invoices from -30 to +90 days (no status filters) so deposits
+// on future/open reservations are included alongside closed checkouts.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -33,10 +33,10 @@ async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
   const all = [];
   let pageStart = 1;
   while (true) {
+    // No complete/closed_only filters: we need ALL invoices in the window,
+    // including open future reservations that had deposits collected today.
     const params = new URLSearchParams({
       key, from_date, to_date,
-      complete: 'true',
-      // No closed_only: deposits live on open invoices (future reservations)
       per_page: String(PER_PAGE), page: String(pageStart),
     });
     const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/list_invoices?${params}`);
@@ -107,7 +107,7 @@ function aggregate(transactions, from_date, to_date) {
     let invoiceMatched = false;
 
     for (const item of Object.values(tx.payment_items)) {
-      // Determine the payment date from transaction_time (preferred) or create_stamp
+      // Filter strictly by payment date (transaction_time in Pacific time)
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
       if (!ts) continue;
 
@@ -147,8 +147,8 @@ module.exports = async function handler(req, res) {
 
   try {
     // Fetch -30 days (past checkouts) to +90 days (deposits on future reservations).
-    // Deposits are paid at booking time on invoices whose service date may be months away.
-    // Without closed_only, open invoices with deposits are included.
+    // No status filters so open invoices with deposits are included.
+    // Accuracy is enforced by aggregate() filtering payment_items by transaction_time.
     const windowStart = addDays(from_date, -30);
     const windowEnd   = addDays(to_date, 90);
 
