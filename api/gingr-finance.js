@@ -26,30 +26,34 @@ async function fetchAllInvoices(subdomain, key, from_date, to_date) {
   return all;
 }
 
-async function fetchSingleInvoice(subdomain, key, invoice_id) {
-  const params = new URLSearchParams({ key, id: invoice_id });
-  const url = `https://${subdomain}.gingrapp.com/api/v1/get_invoice?${params}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Gingr HTTP ${res.status}`);
-  return res.json();
-}
-
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date, invoice_id } = req.query;
+  const { facility, from_date, to_date, test_endpoint, test_id } = req.query;
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
 
-  // Mode: fetch single invoice details (for inspecting payment shape)
-  if (invoice_id) {
+  // Test mode: probe arbitrary Gingr endpoints
+  if (test_endpoint) {
     try {
-      const data = await fetchSingleInvoice(config.subdomain, config.key, invoice_id);
-      return res.status(200).json(data);
+      const params = new URLSearchParams({ key: config.key });
+      if (test_id) params.set('id', test_id);
+      // Try GET first
+      const url = `https://${config.subdomain}.gingrapp.com/api/v1/${test_endpoint}?${params}`;
+      let r = await fetch(url, { method: 'GET' });
+      let body = await r.text();
+      // If GET 404/405, try POST
+      if (!r.ok) {
+        const postBody = new URLSearchParams({ key: config.key, id: test_id || '' });
+        const r2 = await fetch(`https://${config.subdomain}.gingrapp.com/api/v1/${test_endpoint}`, { method: 'POST', body: postBody });
+        body = await r2.text();
+        return res.status(200).json({ method: 'POST', status: r2.status, body: body.slice(0, 2000) });
+      }
+      return res.status(200).json({ method: 'GET', status: r.status, body: body.slice(0, 2000) });
     } catch (err) {
       return res.status(502).json({ success: false, error: err.message });
     }
