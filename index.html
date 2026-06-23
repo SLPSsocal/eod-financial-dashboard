@@ -43,6 +43,9 @@
   .chart-wrap h3 { font-size:14px; font-weight:600; margin-bottom:16px; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .spinner { width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--how); border-radius:50%; animation:spin 0.7s linear infinite; display:inline-block; vertical-align:middle; margin-right:6px; }
+  .fac-toggles { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .ftoggle { padding:6px 14px; border-radius:20px; border:1.5px solid var(--border); background:transparent; color:var(--muted); font-size:13px; font-weight:500; cursor:pointer; transition:all 0.15s; }
+  .ftoggle.active { background:color-mix(in srgb, var(--fc) 15%, transparent); border-color:var(--fc); color:var(--fc); }
   @media (max-width:600px) {
     .header { padding:12px 16px; } .header h1 { font-size:15px; }
     .controls { padding:12px 16px; } .main { padding:12px 16px; }
@@ -104,24 +107,29 @@
   </div>
   <div class="page" id="page-trends">
     <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <label style="font-size:13px;color:var(--muted)">From</label>
         <input type="date" id="trend-from" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
         <label style="font-size:13px;color:var(--muted)">To</label>
         <input type="date" id="trend-to" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
-        <select id="trend-facility" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
-          <option value="how">House of Woof</option><option value="rw">Riverwalk</option>
-          <option value="fpi">Four Paws Inn</option><option value="dd">Don Doggos</option>
-        </select>
         <button class="btn" onclick="loadTrends()">Load Trends</button>
       </div>
+      <div class="fac-toggles">
+        <button class="ftoggle active" data-fac="how" style="--fc:#4f8ef7" onclick="toggleFac(this)">House of Woof</button>
+        <button class="ftoggle active" data-fac="rw"  style="--fc:#22c55e" onclick="toggleFac(this)">Riverwalk</button>
+        <button class="ftoggle active" data-fac="fpi" style="--fc:#f59e0b" onclick="toggleFac(this)">Four Paws Inn</button>
+        <button class="ftoggle active" data-fac="dd"  style="--fc:#ec4899" onclick="toggleFac(this)">Don Doggos</button>
+      </div>
     </div>
-    <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart" height="280"></canvas></div>
-    <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart" height="280"></canvas></div>
+    <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart" height="300"></canvas></div>
+    <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart" height="300"></canvas></div>
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-datalabels/2.2.0/chartjs-plugin-datalabels.min.js"></script>
 <script>
+Chart.register(ChartDataLabels);
+
 const FACILITIES = [
   { key:'how', name:'House of Woof', color:'#4f8ef7' },
   { key:'rw',  name:'Riverwalk',     color:'#22c55e' },
@@ -143,116 +151,170 @@ const cache = {};
 
 function fmt(n) {
   if (!n) return '<span class="zero">-</span>';
-  const s = '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-  return n < 0 ? '<span class="neg">-' + s + '</span>' : s;
+  const s = '$' + Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return n < 0 ? '<span class="neg">-'+s+'</span>' : s;
 }
 function fmtNet(n, color) {
-  const s = '$' + Math.abs(n||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-  return '<span style="color:' + color + '">' + (n < 0 ? '-' : '') + s + '</span>';
+  const s = '$' + Math.abs(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  return '<span style="color:'+color+'">'+(n<0?'-':'')+s+'</span>';
 }
+function fmtK(n) {
+  const abs = Math.abs(n);
+  if (abs >= 1000) return '$'+(abs/1000).toFixed(1).replace(/\.0$/,'')+'k';
+  return '$'+abs.toFixed(0);
+}
+
 function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['eod','trends'][i] === tab));
-  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + tab));
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active',['eod','trends'][i]===tab));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active',p.id==='page-'+tab));
+}
+function toggleFac(btn) {
+  const active = document.querySelectorAll('.ftoggle.active');
+  if (btn.classList.contains('active') && active.length === 1) return;
+  btn.classList.toggle('active');
+}
+function getActiveFacs() {
+  return [...document.querySelectorAll('.ftoggle.active')].map(b => b.dataset.fac);
 }
 function initDates() {
-  const t = new Date(), y = new Date(t); y.setDate(y.getDate()-1);
+  const t=new Date(), y=new Date(t); y.setDate(y.getDate()-1);
   document.getElementById('eod-date').value = y.toISOString().split('T')[0];
-  const m = new Date(t); m.setDate(m.getDate()-30);
+  const m=new Date(t); m.setDate(m.getDate()-30);
   document.getElementById('trend-from').value = m.toISOString().split('T')[0];
   document.getElementById('trend-to').value = y.toISOString().split('T')[0];
 }
 async function apiFetch(facility, from_date, to_date) {
-  const k = facility + '|' + from_date + '|' + to_date;
+  const k=facility+'|'+from_date+'|'+to_date;
   if (cache[k]) return cache[k];
-  const res = await fetch('/api/gingr-finance?facility=' + facility + '&from_date=' + from_date + '&to_date=' + to_date);
+  const res = await fetch('/api/gingr-finance?facility='+facility+'&from_date='+from_date+'&to_date='+to_date);
   const data = await res.json();
-  if (data.success) cache[k] = data;
+  if (data.success) cache[k]=data;
   return data;
 }
 function setLoading() {
   document.getElementById('eod-tbody').innerHTML = PAYMENT_ROWS.map(row =>
-    '<tr><td><span class="dot" style="background:' + row.color + '"></span>' + row.label + '</td>' +
+    '<tr><td><span class="dot" style="background:'+row.color+'"></span>'+row.label+'</td>'+
     '<td colspan="4" style="color:var(--muted)"><span class="spinner"></span>Loading...</td><td>&mdash;</td></tr>'
   ).join('');
   ['how','rw','fpi','dd','total'].forEach(k => {
-    document.getElementById('inv-'+k).innerHTML = '&mdash;';
-    document.getElementById('net-'+k).innerHTML = '&mdash;';
+    document.getElementById('inv-'+k).innerHTML='&mdash;';
+    document.getElementById('net-'+k).innerHTML='&mdash;';
   });
-  document.getElementById('table-wrap').style.display = '';
-  document.getElementById('empty-msg').style.display = 'none';
+  document.getElementById('table-wrap').style.display='';
+  document.getElementById('empty-msg').style.display='none';
 }
 function renderTable(results) {
-  const tbody = document.getElementById('eod-tbody');
-  tbody.innerHTML = PAYMENT_ROWS.map(row => {
-    const cols = FACILITIES.map((fac, i) => {
-      const r = results[i];
-      if (!r || !r.success) return '<td class="zero">-</td>';
-      const v = (r.totals && r.totals[row.key]) || 0;
-      return '<td>' + fmt(v) + '</td>';
+  document.getElementById('eod-tbody').innerHTML = PAYMENT_ROWS.map(row => {
+    const cols = FACILITIES.map((fac,i) => {
+      const r=results[i];
+      if (!r||!r.success) return '<td class="zero">-</td>';
+      return '<td>'+fmt((r.totals&&r.totals[row.key])||0)+'</td>';
     }).join('');
-    const total = results.reduce((sum, r) => sum + (r && r.success ? ((r.totals && r.totals[row.key]) || 0) : 0), 0);
-    return '<tr><td><span class="dot" style="background:' + row.color + '"></span>' + row.label + '</td>' + cols + '<td>' + fmt(total) + '</td></tr>';
+    const total = results.reduce((s,r) => s+(r&&r.success?((r.totals&&r.totals[row.key])||0):0),0);
+    return '<tr><td><span class="dot" style="background:'+row.color+'"></span>'+row.label+'</td>'+cols+'<td>'+fmt(total)+'</td></tr>';
   }).join('');
-
-  let totalInv = 0;
-  FACILITIES.forEach((fac, i) => {
-    const r = results[i];
-    const n = r && r.success ? (r.invoice_count || 0) : null;
-    document.getElementById('inv-'+fac.key).textContent = n !== null ? n + ' inv.' : '-';
-    if (n) totalInv += n;
+  let totalInv=0;
+  FACILITIES.forEach((fac,i) => {
+    const r=results[i], n=r&&r.success?(r.invoice_count||0):null;
+    document.getElementById('inv-'+fac.key).textContent=n!==null?n+' inv.':'-';
+    if(n) totalInv+=n;
   });
-  document.getElementById('inv-total').textContent = totalInv + ' inv.';
-
-  let grand = 0;
-  FACILITIES.forEach((fac, i) => {
-    const r = results[i];
-    const net = r && r.success ? (r.net_total || 0) : null;
-    document.getElementById('net-'+fac.key).innerHTML = net !== null ? fmtNet(net, fac.color) : '&mdash;';
-    if (net !== null) grand += net;
+  document.getElementById('inv-total').textContent=totalInv+' inv.';
+  let grand=0;
+  FACILITIES.forEach((fac,i) => {
+    const r=results[i], net=r&&r.success?(r.net_total||0):null;
+    document.getElementById('net-'+fac.key).innerHTML=net!==null?fmtNet(net,fac.color):'&mdash;';
+    if(net!==null) grand+=net;
   });
-  document.getElementById('net-total').innerHTML = fmtNet(grand, '#e2e8f0');
+  document.getElementById('net-total').innerHTML=fmtNet(grand,'#e2e8f0');
 }
 async function loadEOD() {
-  const date = document.getElementById('eod-date').value;
-  if (!date) return;
-  const btn = document.getElementById('load-btn');
-  btn.disabled = true;
-  document.getElementById('status-text').textContent = 'Loading...';
+  const date=document.getElementById('eod-date').value;
+  if(!date) return;
+  const btn=document.getElementById('load-btn');
+  btn.disabled=true;
+  document.getElementById('status-text').textContent='Loading...';
   setLoading();
-  const results = await Promise.all(
-    FACILITIES.map(f => apiFetch(f.key, date, date).catch(e => ({ success:false, error:e.message })))
-  );
+  const results=await Promise.all(FACILITIES.map(f=>apiFetch(f.key,date,date).catch(e=>({success:false,error:e.message}))));
   renderTable(results);
-  document.getElementById('status-text').textContent = results.filter(r => r && r.success).length + '/4 facilities loaded';
-  btn.disabled = false;
+  document.getElementById('status-text').textContent=results.filter(r=>r&&r.success).length+'/4 facilities loaded';
+  btn.disabled=false;
 }
-let trendChart = null, breakdownChart = null;
+
+let trendChart=null, breakdownChart=null;
+
 async function loadTrends() {
-  const from = document.getElementById('trend-from').value;
-  const to = document.getElementById('trend-to').value;
-  const facility = document.getElementById('trend-facility').value;
-  if (!from || !to) return;
-  const days = [];
-  const cur = new Date(from+'T12:00:00Z'), end = new Date(to+'T12:00:00Z');
-  while (cur <= end) { days.push(cur.toISOString().split('T')[0]); cur.setUTCDate(cur.getUTCDate()+1); }
-  const results = await Promise.all(days.map(d => apiFetch(facility, d, d).catch(() => null)));
-  const labels = days.map(d => new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}));
-  const fac = FACILITIES.find(f => f.key === facility);
-  if (trendChart) trendChart.destroy();
-  trendChart = new Chart(document.getElementById('trend-chart'), {
+  const from=document.getElementById('trend-from').value;
+  const to=document.getElementById('trend-to').value;
+  const activeFacs=getActiveFacs().map(k=>FACILITIES.find(f=>f.key===k));
+  if(!from||!to||!activeFacs.length) return;
+
+  const days=[];
+  const cur=new Date(from+'T12:00:00Z'), end=new Date(to+'T12:00:00Z');
+  while(cur<=end){ days.push(cur.toISOString().split('T')[0]); cur.setUTCDate(cur.getUTCDate()+1); }
+  const labels=days.map(d=>new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',timeZone:'UTC'}));
+
+  const allResults={};
+  await Promise.all(activeFacs.map(async fac=>{
+    allResults[fac.key]=await Promise.all(days.map(d=>apiFetch(fac.key,d,d).catch(()=>null)));
+  }));
+
+  if(trendChart) trendChart.destroy();
+  trendChart=new Chart(document.getElementById('trend-chart'),{
     type:'bar',
-    data:{ labels, datasets:[{ label:'Net Revenue', data:results.map(r=>(r&&r.net_total)||0), backgroundColor:fac.color+'90', borderColor:fac.color, borderWidth:1 }] },
-    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{ x:{grid:{color:'#2a2d3a'},ticks:{color:'#8892a4',maxRotation:45}}, y:{grid:{color:'#2a2d3a'},ticks:{color:'#8892a4',callback:v=>'$'+v.toLocaleString()}} } }
+    data:{
+      labels,
+      datasets: activeFacs.map(fac=>({
+        label: fac.name,
+        data: allResults[fac.key].map(r=>(r&&r.net_total)||0),
+        backgroundColor: fac.color+'99',
+        borderColor: fac.color,
+        borderWidth:1,
+        borderRadius:2,
+      }))
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{ labels:{color:'#e2e8f0',padding:16} },
+        datalabels:{ display:false }
+      },
+      scales:{
+        x:{grid:{color:'#2a2d3a'},ticks:{color:'#8892a4',maxRotation:45}},
+        y:{grid:{color:'#2a2d3a'},ticks:{color:'#8892a4',callback:v=>'$'+v.toLocaleString()}}
+      }
+    }
   });
-  const agg = {};
-  for (const r of results) { if (!r||!r.success) continue; for (const [k,v] of Object.entries(r.totals||{})) agg[k]=(agg[k]||0)+v; }
-  const pmL=[], pmD=[], pmC=[];
-  for (const row of PAYMENT_ROWS) { if (agg[row.key]>0) { pmL.push(row.label); pmD.push(Math.abs(agg[row.key])); pmC.push(row.color); } }
-  if (breakdownChart) breakdownChart.destroy();
-  breakdownChart = new Chart(document.getElementById('breakdown-chart'), {
+
+  const agg={};
+  for(const fac of activeFacs){
+    for(const r of allResults[fac.key]){
+      if(!r||!r.success) continue;
+      for(const [k,v] of Object.entries(r.totals||{})) agg[k]=(agg[k]||0)+v;
+    }
+  }
+  const pmL=[],pmD=[],pmC=[];
+  for(const row of PAYMENT_ROWS){ if(agg[row.key]>0){ pmL.push(row.label); pmD.push(Math.abs(agg[row.key])); pmC.push(row.color); } }
+
+  if(breakdownChart) breakdownChart.destroy();
+  breakdownChart=new Chart(document.getElementById('breakdown-chart'),{
     type:'doughnut',
     data:{ labels:pmL, datasets:[{ data:pmD, backgroundColor:pmC, borderColor:'#1a1d27', borderWidth:2 }] },
-    options:{ responsive:true, plugins:{ legend:{labels:{color:'#e2e8f0',padding:16}}, tooltip:{callbacks:{label:ctx=>' '+ctx.label+': $'+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:2})}} } }
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{ labels:{color:'#e2e8f0',padding:16,font:{size:13}} },
+        tooltip:{ callbacks:{ label:ctx=>' '+ctx.label+': $'+ctx.raw.toLocaleString('en-US',{minimumFractionDigits:2}) } },
+        datalabels:{
+          color:'#fff',
+          font:{ weight:'bold', size:12 },
+          formatter:(value)=>fmtK(value),
+          anchor:'center',
+          align:'center',
+          display:(ctx)=>ctx.dataset.data[ctx.dataIndex]>0,
+        }
+      }
+    }
   });
 }
 initDates();
