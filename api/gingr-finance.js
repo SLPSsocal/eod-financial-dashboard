@@ -108,16 +108,27 @@ function normalizeDeposit(dep) {
 
 function getItemsToProcess(tx) {
   const items = [];
-  // Regular payment items
-  if (tx.payment_items && typeof tx.payment_items === 'object') {
-    items.push(...Object.values(tx.payment_items));
-  }
-  // Deposit items (separate field discovered via debug)
+
+  // Collect deposit payment_ids so we can exclude them from payment_items (they'd double-count)
+  const depositPaymentIds = new Set();
   const depSrc = tx.deposits || tx.deposit;
   if (depSrc) {
     const deps = Array.isArray(depSrc) ? depSrc : Object.values(depSrc);
+    for (const d of deps) {
+      if (d.payment_id) depositPaymentIds.add(String(d.payment_id));
+    }
     items.push(...deps.map(normalizeDeposit));
   }
+
+  // Regular payment items — skip any whose key is a deposit payment_id
+  if (tx.payment_items && typeof tx.payment_items === 'object') {
+    for (const [key, item] of Object.entries(tx.payment_items)) {
+      if (!depositPaymentIds.has(String(key))) {
+        items.push(item);
+      }
+    }
+  }
+
   return items;
 }
 
