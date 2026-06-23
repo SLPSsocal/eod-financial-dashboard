@@ -89,16 +89,20 @@ function categorize(item) {
   return 'other';
 }
 
-// Normalize a deposit record so it looks like a payment_item for categorize().
-// Gingr deposit fields may differ slightly from payment_item fields.
+// Normalize a deposit record to match the payment_item shape expected by categorize().
+// Actual Gingr deposit fields (from debug):
+//   deposit_amount: dollar amount, consumed_at: Unix ts when applied at checkout,
+//   payment_method: e.g. "Gingr Payments" or "Helcim", refund_amount: refund if any
 function normalizeDeposit(dep) {
+  const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
   return {
-    payment_method_type: dep.payment_method_type || dep.type || '',
+    payment_method_type: dep.payment_method || dep.payment_method_type || dep.type || '',
     processor: dep.processor || null,
-    total_balance: dep.amount || dep.total_balance || dep.deposit_amount || '0',
-    zero_payment: dep.zero_payment || '0',
-    transaction_time: dep.transaction_time || dep.create_stamp || dep.date || null,
-    payment_allocation_refund: dep.refund || dep.payment_allocation_refund || '0',
+    total_balance: dep.deposit_amount || dep.paid_amount || dep.amount || dep.total_balance || '0',
+    zero_payment: '0',
+    // consumed_at = when deposit was applied (checkout date) — matches Gingr EOD report date
+    transaction_time: dep.consumed_at || dep.check_out_stamp || dep.created_at || null,
+    payment_allocation_refund: isRefund ? '1' : '0',
   };
 }
 
