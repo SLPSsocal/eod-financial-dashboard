@@ -216,29 +216,7 @@ function setLoading() {
 }
 function renderTable(results) {
   const tbody = document.getElementById('eod-tbody');
-  const rows = PAYMENT_ROWS.filter(row =>
-    results.some(r => r && r.success && Math.abs((r.totals && r.totals[row.key]) || 0) > 0)
-  );
-
-  tbody.innerHTML = rows.map(row => {
-    const cols = FACILITIES.map((fac, i) => {
-      const r = results[i];
-      if (!r) return '<td class="zero">-</td>';
-      if (!r.success) return '<td class="zero">err</td>';
-      const v = (r.totals && r.totals[row.key]) || 0;
-      return '<td>' + fmt(v) + '</td>';
-    }).join('');
-    const total = results.reduce((sum, r) => sum + (r && r.success ? ((r.totals && r.totals[row.key]) || 0) : 0), 0);
-    return '<tr><td><span class="row-label-dot" style="background:' + row.color + '"></span>' + row.label + '</td>' + cols + '<td>' + fmt(total) + '</td></tr>';
-  }).join('');
-
-  let totalInv = 0;
-  FACILITIES.forEach((fac, i) => {
-    const r = results[i];
-    const n = r && r.success ? (r.invoice_count || 0) : null;
-    document.getElementById('inv-' + fac.key).textContent = n !== null ? n + ' inv.' : '-';
-    if (n) totalInv += n;
-  });
+  const rows = PAYMENT_ROWS;
   document.getElementById('inv-total').textContent = totalInv + ' inv.';
 
   let grandTotal = 0;
