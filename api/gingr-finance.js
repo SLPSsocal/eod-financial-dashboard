@@ -230,19 +230,28 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // Debug: find the tx containing Helcim key 6010 and dump its top-level fields + dates
+    // Debug: dump ALL keys/values of the tx containing Helcim key 6010 (1 level deep)
     let debugOut = {};
     if (req.query.debug === 'true') {
       let txSample = null;
       for (const tx of transactions) {
         if (tx?.payment_items?.['6010']) { txSample = tx; break; }
       }
-      const txFields = txSample ? Object.keys(txSample).reduce((acc, k) => {
-        const v = txSample[k];
-        if (typeof v !== 'object' || v === null) acc[k] = v;
-        return acc;
-      }, {}) : 'not found';
-      debugOut = { tx_6010_fields: txFields };
+      if (txSample) {
+        const shallow = {};
+        for (const [k, v] of Object.entries(txSample)) {
+          if (v === null || typeof v !== 'object') {
+            shallow[k] = v;
+          } else if (Array.isArray(v)) {
+            shallow[k] = `[array len=${v.length}]`;
+          } else {
+            shallow[k] = `{keys: ${Object.keys(v).slice(0,8).join(',')}}`;
+          }
+        }
+        debugOut = { tx_6010_shallow: shallow, tx_6010_keys: Object.keys(txSample) };
+      } else {
+        debugOut = { tx_6010_shallow: 'NOT FOUND' };
+      }
     }
 
     return res.status(200).json({
