@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>EOD Financial Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -16,13 +15,6 @@
     --rw: #22c55e;
     --fpi: #f59e0b;
     --dd: #ec4899;
-    --cardconnect: #6366f1;
-    --helcim: #14b8a6;
-    --gingr: #8b5cf6;
-    --cash: #22c55e;
-    --check: #f59e0b;
-    --refund: #ef4444;
-    --other: #94a3b8;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
@@ -38,52 +30,39 @@
   .btn { padding: 7px 20px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; background: var(--how); color: #fff; transition: opacity 0.15s; }
   .btn:hover { opacity: 0.85; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-sm { padding: 5px 12px; font-size: 12px; background: var(--card); border: 1px solid var(--border); color: var(--muted); border-radius: 5px; cursor: pointer; }
   .main { padding: 24px; }
   .page { display: none; }
   .page.active { display: block; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .eod-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .eod-table th, .eod-table td { padding: 11px 18px; text-align: right; border-bottom: 1px solid var(--border); }
+  .eod-table th:first-child, .eod-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); }
+  .eod-table thead th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #12141e; padding-top: 14px; padding-bottom: 14px; }
+  .eod-table thead th.col-how { color: var(--how); }
+  .eod-table thead th.col-rw  { color: var(--rw); }
+  .eod-table thead th.col-fpi { color: var(--fpi); }
+  .eod-table thead th.col-dd  { color: var(--dd); }
+  .eod-table thead th.col-total { color: var(--text); }
+  .eod-table tbody tr:hover { background: #ffffff05; }
+  .eod-table td.zero { color: #3a3f50; }
+  .eod-table td.negative { color: #ef4444; }
+  .eod-table td { font-variant-numeric: tabular-nums; }
+  .eod-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; font-weight: 700; font-size: 15px; padding-top: 14px; padding-bottom: 14px; }
+  .eod-table tfoot td:first-child { color: var(--text); }
+  .eod-table .inv-row td { font-size: 11px; color: var(--muted); border-bottom: 2px solid var(--border); padding-top: 5px; padding-bottom: 10px; }
+  .row-label-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .facility-name { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .invoice-count { font-size: 12px; color: var(--muted); }
-  .payment-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid #ffffff08; }
-  .payment-row:last-child { border-bottom: none; }
-  .payment-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-  .payment-chip { width: 8px; height: 8px; border-radius: 2px; }
-  .payment-amount { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .payment-amount.negative { color: var(--refund); }
-  .total-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
-  .total-label { font-size: 13px; font-weight: 600; }
-  .total-amount { font-size: 18px; font-weight: 700; }
-  .summary-bar { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 20px; }
-  .summary-bar h2 { font-size: 14px; color: var(--muted); margin-bottom: 16px; font-weight: 500; }
-  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
-  .summary-item { }
-  .summary-item .s-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  .summary-item .s-value { font-size: 20px; font-weight: 700; }
-  .loading-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; display: flex; align-items: center; gap: 12px; }
-  .spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .error-card { background: #ef444410; border: 1px solid #ef444440; border-radius: 10px; padding: 16px; color: #f87171; font-size: 13px; }
-  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); font-size: 14px; }
   .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
   .chart-wrap h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
-  .trend-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
-  .facility-toggles { display: flex; gap: 8px; flex-wrap: wrap; }
-  .ftoggle { padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; transition: all 0.15s; }
-  .ftoggle.active { border-color: currentColor; }
-  .progress-bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
-  .progress-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
 </style>
 </head>
 <body>
-
 <div class="header">
   <div>
     <h1>EOD Financial Dashboard</h1>
-    <div class="subtitle">House of Woof Â&middot; Riverwalk Â&middot; Four Paws Inn Â&middot; Don Doggos</div>
+    <div class="subtitle">House of Woof &middot; Riverwalk &middot; Four Paws Inn &middot; Don Doggos</div>
   </div>
   <div class="tabs">
     <button class="tab active" onclick="switchTab('eod')">EOD Report</button>
@@ -99,21 +78,45 @@
 </div>
 
 <div class="main">
-  <!-- EOD Tab -->
   <div class="page active" id="page-eod">
-    <div id="summary-bar" style="display:none" class="summary-bar">
-      <h2>ALL FACILITIES &mdash; NET TOTALS</h2>
-      <div class="summary-grid" id="summary-grid"></div>
+    <div class="table-wrap" id="table-wrap" style="display:none">
+      <table class="eod-table">
+        <thead>
+          <tr>
+            <th>Payment Method</th>
+            <th class="col-how">HOW</th>
+            <th class="col-rw">Riverwalk</th>
+            <th class="col-fpi">FPI</th>
+            <th class="col-dd">Don Doggos</th>
+            <th class="col-total">Total</th>
+          </tr>
+          <tr class="inv-row">
+            <td>Invoices</td>
+            <td id="inv-how">&mdash;</td>
+            <td id="inv-rw">&mdash;</td>
+            <td id="inv-fpi">&mdash;</td>
+            <td id="inv-dd">&mdash;</td>
+            <td id="inv-total">&mdash;</td>
+          </tr>
+        </thead>
+        <tbody id="eod-tbody"></tbody>
+        <tfoot>
+          <tr>
+            <td>Net Total</td>
+            <td id="net-how">&mdash;</td>
+            <td id="net-rw">&mdash;</td>
+            <td id="net-fpi">&mdash;</td>
+            <td id="net-dd">&mdash;</td>
+            <td id="net-total">&mdash;</td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
-    <div class="grid" id="cards-grid"></div>
+    <div id="empty-msg" style="text-align:center;padding:60px 20px;color:var(--muted);font-size:14px">Select a date and click Load</div>
   </div>
 
-  <!-- Trends Tab -->
   <div class="page" id="page-trends">
     <div class="card" style="margin-bottom:16px">
-      <div class="card-header" style="margin-bottom:12px">
-        <span style="font-size:14px;font-weight:600">Date Range</span>
-      </div>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <label style="font-size:13px;color:var(--muted)">From</label>
         <input type="date" id="trend-from" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
@@ -128,41 +131,43 @@
         <button class="btn" onclick="loadTrends()">Load Trends</button>
       </div>
     </div>
-    <div class="chart-wrap">
-      <h3>Daily Net Revenue</h3>
-      <canvas id="trend-chart" height="280"></canvas>
-    </div>
-    <div class="chart-wrap">
-      <h3>Payment Method Breakdown</h3>
-      <canvas id="breakdown-chart" height="280"></canvas>
-    </div>
+    <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart" height="280"></canvas></div>
+    <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart" height="280"></canvas></div>
   </div>
 </div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
-const FACILITIES = {
-  how: { name: 'House of Woof', color: '#4f8ef7' },
-  rw:  { name: 'Riverwalk',     color: '#22c55e' },
-  fpi: { name: 'Four Paws Inn', color: '#f59e0b' },
-  dd:  { name: 'Don Doggos',    color: '#ec4899' },
-};
+const FACILITIES = [
+  { key: 'how', name: 'House of Woof', color: '#4f8ef7' },
+  { key: 'rw',  name: 'Riverwalk',     color: '#22c55e' },
+  { key: 'fpi', name: 'Four Paws Inn', color: '#f59e0b' },
+  { key: 'dd',  name: 'Don Doggos',    color: '#ec4899' },
+];
 
-const PAYMENT_LABELS = {
-  cardconnect:   { label: 'CardConnect',     color: '#6366f1' },
-  helcim:        { label: 'Helcim',          color: '#14b8a6' },
-  gingr_payments:{ label: 'Gingr Payments',  color: '#8b5cf6' },
-  credit_card:   { label: 'Credit Card',     color: '#a78bfa' },
-  cash:          { label: 'Cash',            color: '#22c55e' },
-  check:         { label: 'Check',           color: '#f59e0b' },
-  store_credit:  { label: 'Store Credit',    color: '#06b6d4' },
-  other:         { label: 'Other',           color: '#94a3b8' },
-  refunds:       { label: 'Refunds',         color: '#ef4444' },
-};
+const PAYMENT_ROWS = [
+  { key: 'cardconnect',    label: 'CardConnect',    color: '#6366f1' },
+  { key: 'helcim',         label: 'Helcim',         color: '#14b8a6' },
+  { key: 'gingr_payments', label: 'Gingr Payments', color: '#8b5cf6' },
+  { key: 'cash',           label: 'Cash',           color: '#22c55e' },
+  { key: 'check',          label: 'Check',          color: '#f59e0b' },
+  { key: 'store_credit',   label: 'Store Credit',   color: '#06b6d4' },
+  { key: 'credit_card',    label: 'Credit Card',    color: '#a78bfa' },
+  { key: 'refunds',        label: 'Refunds',        color: '#ef4444' },
+  { key: 'other',          label: 'Other',          color: '#94a3b8' },
+];
 
 const cache = {};
 
 function fmt(n) {
-  return '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (!n) return '<span class="zero">-</span>';
+  const neg = n < 0;
+  const s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return neg ? '<span class="negative">-' + s + '</span>' : s;
+}
+
+function fmtNet(n, color) {
+  const s = '$' + Math.abs(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '<span style="color:' + color + '">' + ((n < 0 ? '-' : '') + s) + '</span>';
 }
 
 function switchTab(tab) {
@@ -170,217 +175,119 @@ function switchTab(tab) {
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + tab));
 }
 
-function setDate(id, d) {
-  document.getElementById(id).value = d.toISOString().split('T')[0];
-}
-
 function initDates() {
   const today = new Date();
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-  setDate('eod-date', yesterday);
+  document.getElementById('eod-date').value = yesterday.toISOString().split('T')[0];
   const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
-  setDate('trend-from', monthAgo);
-  setDate('trend-to', yesterday);
+  document.getElementById('trend-from').value = monthAgo.toISOString().split('T')[0];
+  document.getElementById('trend-to').value = yesterday.toISOString().split('T')[0];
 }
 
 async function apiFetch(facility, from_date, to_date) {
-  const key = `${facility}|${from_date}|${to_date}`;
-  if (cache[key]) return cache[key];
-  const url = `/api/gingr-finance?facility=${facility}&from_date=${from_date}&to_date=${to_date}`;
-  const res = await fetch(url);
+  const k = facility + '|' + from_date + '|' + to_date;
+  if (cache[k]) return cache[k];
+  const res = await fetch('/api/gingr-finance?facility=' + facility + '&from_date=' + from_date + '&to_date=' + to_date);
   const data = await res.json();
-  if (data.success) cache[key] = data;
+  if (data.success) cache[k] = data;
   return data;
 }
 
-function renderCard(facility, data, isLoading, error) {
-  const fac = FACILITIES[facility];
-  const container = document.createElement('div');
-
-  if (isLoading) {
-    container.innerHTML = `<div class="loading-card"><div class="spinner"></div><span style="font-size:13px;color:var(--muted)">${fac.name} loadingâ¦</span></div>`;
-    return container;
-  }
-  if (error || !data.success) {
-    container.innerHTML = `<div class="error-card"><b>${fac.name}</b><br>${error || data.error}</div>`;
-    return container;
-  }
-
-  const t = data.totals || {};
-  const rows = Object.entries(PAYMENT_LABELS)
-    .filter(([k]) => (t[k] || 0) !== 0)
-    .map(([k, meta]) => {
-      const amt = t[k] || 0;
-      return `<div class="payment-row">
-        <div class="payment-label">
-          <div class="payment-chip" style="background:${meta.color}"></div>
-          ${meta.label}
-        </div>
-        <div class="payment-amount ${amt < 0 ? 'negative' : ''}">${amt < 0 ? '-' : ''}${fmt(amt)}</div>
-      </div>`;
-    }).join('');
-
-  const net = data.net_total || 0;
-  container.innerHTML = `<div class="card">
-    <div class="card-header">
-      <div class="facility-name">
-        <div class="dot" style="background:${fac.color}"></div>
-        ${fac.name}
-      </div>
-      <div class="invoice-count">${data.invoice_count} invoices</div>
-    </div>
-    ${rows || '<div style="font-size:13px;color:var(--muted);padding:8px 0">No closed invoices for this date</div>'}
-    <div class="total-row">
-      <span class="total-label">Net Total</span>
-      <span class="total-amount" style="color:${fac.color}">${fmt(net)}</span>
-    </div>
-  </div>`;
-  return container;
+function setLoading() {
+  document.getElementById('eod-tbody').innerHTML = PAYMENT_ROWS.map(row =>
+    '<tr><td><span class="row-label-dot" style="background:' + row.color + '"></span>' + row.label + '</td>' +
+    '<td colspan="4" style="color:var(--muted);font-style:italic"><span class="spinner"></span>Loading...</td><td>&mdash;</td></tr>'
+  ).join('');
+  ['how','rw','fpi','dd','total'].forEach(k => {
+    document.getElementById('inv-' + k).innerHTML = '&mdash;';
+    document.getElementById('net-' + k).innerHTML = '&mdash;';
+  });
+  document.getElementById('table-wrap').style.display = '';
+  document.getElementById('empty-msg').style.display = 'none';
 }
+function renderTable(results) {
+  const tbody = document.getElementById('eod-tbody');
+  const rows = PAYMENT_ROWS.filter(row =>
+    results.some(r => r && r.success && Math.abs((r.totals && r.totals[row.key]) || 0) > 0)
+  );
 
-function renderSummary(results) {
-  const agg = {};
+  tbody.innerHTML = rows.map(row => {
+    const cols = FACILITIES.map((fac, i) => {
+      const r = results[i];
+      if (!r) return '<td class="zero">-</td>';
+      if (!r.success) return '<td class="zero">err</td>';
+      const v = (r.totals && r.totals[row.key]) || 0;
+      return '<td>' + fmt(v) + '</td>';
+    }).join('');
+    const total = results.reduce((sum, r) => sum + (r && r.success ? ((r.totals && r.totals[row.key]) || 0) : 0), 0);
+    return '<tr><td><span class="row-label-dot" style="background:' + row.color + '"></span>' + row.label + '</td>' + cols + '<td>' + fmt(total) + '</td></tr>';
+  }).join('');
+
+  let totalInv = 0;
+  FACILITIES.forEach((fac, i) => {
+    const r = results[i];
+    const n = r && r.success ? (r.invoice_count || 0) : null;
+    document.getElementById('inv-' + fac.key).textContent = n !== null ? n + ' inv.' : '-';
+    if (n) totalInv += n;
+  });
+  document.getElementById('inv-total').textContent = totalInv + ' inv.';
+
   let grandTotal = 0;
-  let totalInvoices = 0;
-  for (const d of results) {
-    if (!d || !d.success) continue;
-    totalInvoices += d.invoice_count || 0;
-    grandTotal += d.net_total || 0;
-    for (const [k, v] of Object.entries(d.totals || {})) {
-      agg[k] = (agg[k] || 0) + v;
-    }
-  }
-
-  const bar = document.getElementById('summary-bar');
-  const grid = document.getElementById('summary-grid');
-  bar.style.display = '';
-
-  const items = [
-    { label: 'Grand Total', value: grandTotal, color: '#4f8ef7', bold: true },
-    { label: 'Total Invoices', value: totalInvoices, color: '#e2e8f0', isCount: true },
-    ...Object.entries(PAYMENT_LABELS)
-      .filter(([k]) => (agg[k] || 0) !== 0)
-      .map(([k, meta]) => ({ label: meta.label, value: agg[k], color: meta.color }))
-  ];
-
-  grid.innerHTML = items.map(item => `
-    <div class="summary-item">
-      <div class="s-label">${item.label}</div>
-      <div class="s-value" style="color:${item.color}">${item.isCount ? item.value : fmt(item.value)}</div>
-    </div>
-  `).join('');
+  FACILITIES.forEach((fac, i) => {
+    const r = results[i];
+    const net = r && r.success ? (r.net_total || 0) : null;
+    document.getElementById('net-' + fac.key).innerHTML = net !== null ? fmtNet(net, fac.color) : '&mdash;';
+    if (net !== null) grandTotal += net;
+  });
+  document.getElementById('net-total').innerHTML = fmtNet(grandTotal, '#e2e8f0');
 }
 
 async function loadEOD() {
   const date = document.getElementById('eod-date').value;
   if (!date) return;
-
   const btn = document.getElementById('load-btn');
   btn.disabled = true;
-  document.getElementById('status-text').textContent = 'Loadingâ¦';
-  document.getElementById('summary-bar').style.display = 'none';
-
-  const grid = document.getElementById('cards-grid');
-  grid.innerHTML = '';
-
-  // Show placeholders
-  const placeholders = {};
-  for (const f of Object.keys(FACILITIES)) {
-    const el = renderCard(f, null, true, null);
-    grid.appendChild(el);
-    placeholders[f] = el;
-  }
-
-  // Fetch all in parallel
+  document.getElementById('status-text').textContent = 'Loading...';
+  setLoading();
   const results = await Promise.all(
-    Object.keys(FACILITIES).map(f => apiFetch(f, date, date).catch(e => ({ success: false, error: e.message })))
+    FACILITIES.map(f => apiFetch(f.key, date, date).catch(e => ({ success: false, error: e.message })))
   );
-
-  // Replace placeholders with real cards
-  grid.innerHTML = '';
-  for (let i = 0; i < Object.keys(FACILITIES).length; i++) {
-    const f = Object.keys(FACILITIES)[i];
-    const card = renderCard(f, results[i], false, results[i]?.success === false && !results[i]?.totals ? results[i].error : null);
-    grid.appendChild(card);
-  }
-
-  renderSummary(results);
-  const loaded = results.filter(r => r?.success).length;
-  document.getElementById('status-text').textContent = `${loaded}/4 facilities loaded`;
+  renderTable(results);
+  const loaded = results.filter(r => r && r.success).length;
+  document.getElementById('status-text').textContent = loaded + '/4 facilities loaded';
   btn.disabled = false;
 }
 
-let trendChart = null;
-let breakdownChart = null;
+let trendChart = null, breakdownChart = null;
 
 async function loadTrends() {
   const from = document.getElementById('trend-from').value;
   const to = document.getElementById('trend-to').value;
   const facility = document.getElementById('trend-facility').value;
   if (!from || !to) return;
-
-  // Fetch day by day
   const days = [];
-  const cur = new Date(from);
-  const end = new Date(to);
-  while (cur <= end) {
-    days.push(cur.toISOString().split('T')[0]);
-    cur.setDate(cur.getDate() + 1);
-  }
-
-  const results = await Promise.all(
-    days.map(d => apiFetch(facility, d, d).catch(() => null))
-  );
-
-  const labels = days.map(d => { const dt = new Date(d + 'T12:00:00'); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); });
-  const netData = results.map(r => r?.net_total || 0);
-
+  const cur = new Date(from + 'T12:00:00Z');
+  const end = new Date(to + 'T12:00:00Z');
+  while (cur <= end) { days.push(cur.toISOString().split('T')[0]); cur.setUTCDate(cur.getUTCDate() + 1); }
+  const results = await Promise.all(days.map(d => apiFetch(facility, d, d).catch(() => null)));
+  const labels = days.map(d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }));
+  const netData = results.map(r => (r && r.net_total) || 0);
+  const fac = FACILITIES.find(f => f.key === facility);
   if (trendChart) trendChart.destroy();
-  const fac = FACILITIES[facility];
   trendChart = new Chart(document.getElementById('trend-chart'), {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [{ label: 'Net Revenue', data: netData, backgroundColor: fac.color + '90', borderColor: fac.color, borderWidth: 1 }]
-    },
-    options: {
-      responsive: true, plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', maxRotation: 45 } },
-        y: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } }
-      }
-    }
+    data: { labels, datasets: [{ label: 'Net Revenue', data: netData, backgroundColor: fac.color + '90', borderColor: fac.color, borderWidth: 1 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', maxRotation: 45 } }, y: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } } } }
   });
-
-  // Aggregate by payment method
   const agg = {};
-  for (const r of results) {
-    if (!r?.success) continue;
-    for (const [k, v] of Object.entries(r.totals || {})) {
-      agg[k] = (agg[k] || 0) + v;
-    }
-  }
-
+  for (const r of results) { if (!r || !r.success) continue; for (const [k,v] of Object.entries(r.totals || {})) agg[k] = (agg[k] || 0) + v; }
   const pmLabels = [], pmData = [], pmColors = [];
-  for (const [k, meta] of Object.entries(PAYMENT_LABELS)) {
-    if (agg[k] && agg[k] !== 0) {
-      pmLabels.push(meta.label);
-      pmData.push(Math.abs(agg[k]));
-      pmColors.push(meta.color);
-    }
-  }
-
+  for (const row of PAYMENT_ROWS) { if (agg[row.key] && agg[row.key] > 0) { pmLabels.push(row.label); pmData.push(Math.abs(agg[row.key])); pmColors.push(row.color); } }
   if (breakdownChart) breakdownChart.destroy();
   breakdownChart = new Chart(document.getElementById('breakdown-chart'), {
     type: 'doughnut',
     data: { labels: pmLabels, datasets: [{ data: pmData, backgroundColor: pmColors, borderColor: '#1a1d27', borderWidth: 2 }] },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { labels: { color: '#e2e8f0', padding: 16 } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: $${ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 })}` } }
-      }
-    }
+    options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0', padding: 16 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } } }
   });
 }
 
