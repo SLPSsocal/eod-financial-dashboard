@@ -162,7 +162,8 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date } = req.query;
+  const { facility, from_date, to_date, debug } = req.query;
+  const isDebug = debug === 'true';
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
@@ -186,6 +187,21 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
+    // In debug mode, dump raw deposit fields from first few transactions that have them
+    let rawDeposits = [];
+    if (isDebug) {
+      for (const tx of transactions) {
+        const src = tx?.deposits || tx?.deposit;
+        if (src) {
+          const items = Array.isArray(src) ? src : Object.values(src);
+          if (items.length > 0) {
+            rawDeposits.push({ tx_keys: Object.keys(tx), deposit_items: items.slice(0, 3) });
+            if (rawDeposits.length >= 3) break;
+          }
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
       facility, facilityName: config.name, from_date, to_date,
@@ -193,6 +209,7 @@ module.exports = async function handler(req, res) {
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
+      ...(isDebug ? { rawDeposits } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
