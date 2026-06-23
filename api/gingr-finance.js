@@ -1,5 +1,4 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
-// Filters by PAYMENT DATE (transaction_time), not reservation date.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -73,61 +72,74 @@ async function batchFetch(subdomain, key, ids) {
 function categorize(item) {
   const type = (item.payment_method_type || '').toLowerCase().trim();
   const proc = (item.processor || '').toLowerCase().trim();
-
   if (type === 'no payment' || item.zero_payment === '1') return null;
   if (!parseFloat(item.total_balance || 0)) return null;
-
   if (type === 'cash') return 'cash';
   if (type === 'check') return 'check';
   if (type === 'store credit' || type === 'account credit') return 'store_credit';
-
   if (proc === 'cardconnect') return 'cardconnect';
   if (proc === 'helcim') return 'helcim';
   if (proc === 'stripe') return 'gingr_payments';
-
   if (type.includes('helcim')) return 'helcim';
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
   if (type === 'credit card') return 'credit_card';
-
   return 'other';
 }
 
-function aggregate(transactions, from_date, to_date) {
+function aggregate(transactions, from_date, to_date, debug = false) {
   const t = {
     cardconnect: 0, helcim: 0, gingr_payments: 0,
     cash: 0, check: 0, store_credit: 0, credit_card: 0,
     other: 0, refunds: 0,
   };
   let matched_invoices = 0;
+  const skipped = []; // items on target date that got excluded
+  const topLevelFields = new Set(); // track unexpected top-level fields on transactions
 
   for (const tx of transactions) {
-    if (!tx?.payment_items) continue;
+    if (!tx) continue;
+    // In debug mode, capture top-level keys we haven't seen before
+    if (debug) {
+      Object.keys(tx).forEach(k => topLevelFields.add(k));
+    }
+    if (!tx.payment_items) continue;
     let invoiceMatched = false;
 
     for (const item of Object.values(tx.payment_items)) {
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
-      if (!ts) continue;
+      if (!ts) {
+        if (debug && parseFloat(item.total_balance || 0)) {
+          skipped.push({ reason: 'no_ts', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, zero: item.zero_payment });
+        }
+        continue;
+      }
       const payDate = tsToPacificDate(ts);
       if (payDate < from_date || payDate > to_date) continue;
 
       invoiceMatched = true;
       const amount = parseFloat(item.total_balance || 0);
-      if (!amount) continue;
+
+      if (!amount) {
+        if (debug) skipped.push({ reason: 'zero_balance', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, zero: item.zero_payment, payDate });
+        continue;
+      }
+      if (item.zero_payment === '1') {
+        if (debug) skipped.push({ reason: 'zero_payment_flag', type: item.payment_method_type, proc: item.processor, balance: item.total_balance, payDate });
+        continue;
+      }
 
       if (item.payment_allocation_refund === '1') {
         t.refunds -= amount;
         continue;
       }
-
       const cat = categorize(item);
       if (cat) t[cat] = (t[cat] || 0) + amount;
     }
-
     if (invoiceMatched) matched_invoices++;
   }
 
-  return { totals: t, matched_invoices };
+  return { totals: t, matched_invoices, skipped: debug ? skipped : undefined, topLevelFields: debug ? [...topLevelFields] : undefined };
 }
 
 module.exports = async function handler(req, res) {
@@ -136,18 +148,14 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date } = req.query;
+  const { facility, from_date, to_date, debug } = req.query;
+  const isDebug = debug === 'true';
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    // Three passes to cover all invoice states:
-    // 1. complete=true,  -30 to +1 day  → closed checkouts (bulk of payments)
-    // 2. complete=false, -30 to +90 days → open invoices across entire window
-    //    (catches deposits on same-day open reservations AND future reservations)
-    // Passes 2 uses Safe so an API error there doesn't kill the whole request.
     const windowStart = addDays(from_date, -30);
     const windowEnd   = addDays(to_date, 1);
     const futureEnd   = addDays(to_date, 90);
@@ -159,7 +167,7 @@ module.exports = async function handler(req, res) {
 
     const allIds = [...new Set([...closedIds, ...openIds])];
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
-    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date);
+    const { totals, matched_invoices, skipped, topLevelFields } = aggregate(transactions, from_date, to_date, isDebug);
 
     const net_with_refunds = Math.round(
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
@@ -167,16 +175,14 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      facility,
-      facilityName: config.name,
-      from_date,
-      to_date,
+      facility, facilityName: config.name, from_date, to_date,
       invoices_fetched: allIds.length,
       closed_ids: closedIds.length,
       open_ids: openIds.length,
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
+      ...(isDebug ? { skipped, topLevelFields } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
