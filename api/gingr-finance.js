@@ -1,5 +1,7 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
 // Filters by PAYMENT DATE (transaction_time), not reservation date.
+// Fetches invoices from -30 to +90 days to capture both checkouts (past)
+// and deposits on future reservations (open invoices).
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -9,7 +11,10 @@ const FACILITIES = {
 };
 
 const PER_PAGE = 100;
-const CONCURRENCY = 20;
+const CONCURRENCY = 30;
+
+// Offset for Pacific time: PDT = -7, PST = -8.
+// We use -7 year-round as a practical default; winter dates may be 1hr off near midnight.
 const PACIFIC_OFFSET_HOURS = -7;
 
 function addDays(dateStr, n) {
@@ -18,21 +23,24 @@ function addDays(dateStr, n) {
   return d.toISOString().split('T')[0];
 }
 
+// Convert a Unix timestamp to YYYY-MM-DD in Pacific time
 function tsToPacificDate(ts) {
   const epochMs = (parseInt(ts, 10) + PACIFIC_OFFSET_HOURS * 3600) * 1000;
   return new Date(epochMs).toISOString().split('T')[0];
 }
+
 async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
   const all = [];
   let pageStart = 1;
   while (true) {
     const params = new URLSearchParams({
       key, from_date, to_date,
-      complete: 'true', closed_only: 'true',
+      complete: 'true',
+      // No closed_only: deposits live on open invoices (future reservations)
       per_page: String(PER_PAGE), page: String(pageStart),
     });
-    const res = await fetch('https://' + subdomain + '.gingrapp.com/api/v1/list_invoices?' + params);
-    if (!res.ok) throw new Error('list_invoices HTTP ' + res.status);
+    const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/list_invoices?${params}`);
+    if (!res.ok) throw new Error(`list_invoices HTTP ${res.status}`);
     const json = await res.json();
     if (!json.success) throw new Error(json.error || 'list_invoices failed');
     const page = Array.isArray(json.data) ? json.data : [];
@@ -45,7 +53,7 @@ async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
 
 async function fetchTransaction(subdomain, key, id) {
   const params = new URLSearchParams({ key, id });
-  const res = await fetch('https://' + subdomain + '.gingrapp.com/api/v1/transaction?' + params);
+  const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/transaction?${params}`);
   if (!res.ok) return null;
   const json = await res.json();
   return json.success ? json.data : null;
@@ -60,6 +68,7 @@ async function batchFetch(subdomain, key, ids) {
   }
   return results;
 }
+
 function categorize(item) {
   const type = (item.payment_method_type || '').toLowerCase().trim();
   const proc = (item.processor || '').toLowerCase().trim();
@@ -71,12 +80,12 @@ function categorize(item) {
   if (type === 'check') return 'check';
   if (type === 'store credit' || type === 'account credit') return 'store_credit';
 
-  // Processor field takes priority
+  // Processor field takes priority for card payments
   if (proc === 'cardconnect') return 'cardconnect';
   if (proc === 'helcim') return 'helcim';
   if (proc === 'stripe') return 'gingr_payments';
 
-  // Fallback: match payment_method_type string (processor may be null)
+  // Fallback: check payment_method_type string (processor field may be null)
   if (type.includes('helcim')) return 'helcim';
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
@@ -84,6 +93,7 @@ function categorize(item) {
 
   return 'other';
 }
+
 function aggregate(transactions, from_date, to_date) {
   const t = {
     cardconnect: 0, helcim: 0, gingr_payments: 0,
@@ -93,12 +103,14 @@ function aggregate(transactions, from_date, to_date) {
   let matched_invoices = 0;
 
   for (const tx of transactions) {
-    if (!tx || !tx.payment_items) continue;
+    if (!tx?.payment_items) continue;
     let invoiceMatched = false;
 
     for (const item of Object.values(tx.payment_items)) {
+      // Determine the payment date from transaction_time (preferred) or create_stamp
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
       if (!ts) continue;
+
       const payDate = tsToPacificDate(ts);
       if (payDate < from_date || payDate > to_date) continue;
 
@@ -120,6 +132,7 @@ function aggregate(transactions, from_date, to_date) {
 
   return { totals: t, matched_invoices };
 }
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -127,14 +140,17 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { facility, from_date, to_date } = req.query;
-  const config = FACILITIES[facility && facility.toLowerCase()];
-  if (!config) return res.status(400).json({ success: false, error: 'Unknown facility' });
-  if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: 'Env vars not set for ' + facility });
+  const config = FACILITIES[facility?.toLowerCase()];
+  if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
+  if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    const windowStart = addDays(from_date, -14);
-    const windowEnd   = addDays(to_date, 1);
+    // Fetch -30 days (past checkouts) to +90 days (deposits on future reservations).
+    // Deposits are paid at booking time on invoices whose service date may be months away.
+    // Without closed_only, open invoices with deposits are included.
+    const windowStart = addDays(from_date, -30);
+    const windowEnd   = addDays(to_date, 90);
 
     const ids = await fetchInvoiceIds(config.subdomain, config.key, windowStart, windowEnd);
     const transactions = await batchFetch(config.subdomain, config.key, ids);
@@ -145,9 +161,11 @@ module.exports = async function handler(req, res) {
     ) / 100;
 
     return res.status(200).json({
-      success: true, facility,
+      success: true,
+      facility,
       facilityName: config.name,
-      from_date, to_date,
+      from_date,
+      to_date,
       invoices_fetched: ids.length,
       invoice_count: matched_invoices,
       totals,
