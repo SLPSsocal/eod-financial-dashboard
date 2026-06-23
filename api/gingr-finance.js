@@ -1,9 +1,9 @@
 // Gingr Finance Proxy - EOD Financial Dashboard
 // Revenue attribution rules (matches Gingr's EOD report):
 //   - Gingr Payments / cash / check: payment_items attributed to payment date (transaction_time)
-//   - Helcim / CardConnect: payment_items attributed to INVOICE CHECKOUT DATE (check_out_stamp),
-//     because Gingr's EOD groups all terminal charges (including pre-paid deposits) by checkout day
+//   - Helcim / CardConnect: payment_items attributed to payment date (transaction_time)
 //   - Deposits (deposits field): attributed to COLLECTION DATE (created_at only)
+//   - Lookback window: 60 days to catch long-term boardings whose deposits pre-date 30 days
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -95,20 +95,14 @@ function categorize(item) {
 
 // Normalize a deposit record to the payment_item shape.
 // Rules:
-//  - Only count deposits with a known payment method (skip null/empty — no identifiable revenue source)
-//  - Only use created_at (when the deposit was COLLECTED from the client)
-//  - consumed_at deposits are applied at checkout; for Gingr Payments they're in payment_items already.
-//    For terminal methods (Helcim) we catch them via the checkout-date logic in aggregate().
+//  - Only count deposits with a known payment method (skip null/empty)
+//  - Only use created_at (when deposit was COLLECTED from client)
 //  - Skip cancelled, forfeited, or fully refunded deposits
 function normalizeDeposit(dep) {
   const method = (dep.payment_method || dep.payment_method_type || dep.type || '').trim();
-  // Skip deposits with no identifiable payment method
   if (!method) return null;
-  // Skip cancelled or forfeited
   if (dep.cancel_stamp || dep.forfeited_at) return null;
-  // Skip fully refunded
   if (parseFloat(dep.refund_amount || 0) >= parseFloat(dep.deposit_amount || dep.paid_amount || 1)) return null;
-  // Must have a collection date
   if (!dep.created_at) return null;
 
   const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
@@ -117,7 +111,7 @@ function normalizeDeposit(dep) {
     processor: dep.processor || null,
     total_balance: dep.deposit_amount || dep.paid_amount || dep.amount || dep.total_balance || '0',
     zero_payment: '0',
-    transaction_time: dep.created_at,   // collection date only
+    transaction_time: dep.created_at,
     payment_allocation_refund: isRefund ? '1' : '0',
     _isDeposit: true,
   };
@@ -156,29 +150,13 @@ function aggregate(transactions, from_date, to_date) {
   for (const tx of transactions) {
     if (!tx) continue;
     const items = getItemsToProcess(tx);
-    // Invoice checkout date — used for terminal payment attribution (Helcim, CardConnect)
-    const checkoutDate = tx.check_out_stamp ? tsToPacificDate(tx.check_out_stamp) : null;
     let invoiceMatched = false;
 
     for (const item of items) {
-      const cat = categorize(item);
-
-      // Choose the effective date:
-      //   Deposits (_isDeposit): use created_at stored in transaction_time
-      //   Helcim / CardConnect: use invoice checkout date (Gingr attributes terminal payments by checkout day)
-      //   Everything else: use the payment's own transaction_time
-      let effectiveDate;
-      if (item._isDeposit) {
-        const ts = parseInt(item.transaction_time || 0, 10);
-        effectiveDate = ts ? tsToPacificDate(ts) : null;
-      } else if ((cat === 'helcim' || cat === 'cardconnect') && checkoutDate) {
-        effectiveDate = checkoutDate;
-      } else {
-        const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
-        effectiveDate = ts ? tsToPacificDate(ts) : null;
-      }
-
-      if (!effectiveDate || effectiveDate < from_date || effectiveDate > to_date) continue;
+      const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
+      if (!ts) continue;
+      const payDate = tsToPacificDate(ts);
+      if (payDate < from_date || payDate > to_date) continue;
 
       invoiceMatched = true;
       const amount = parseFloat(item.total_balance || 0);
@@ -190,6 +168,7 @@ function aggregate(transactions, from_date, to_date) {
         continue;
       }
 
+      const cat = categorize(item);
       if (cat) t[cat] = (t[cat] || 0) + amount;
     }
 
@@ -205,15 +184,15 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date, debug } = req.query;
-  const isDebug = debug === 'true';
+  const { facility, from_date, to_date } = req.query;
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    const windowStart = addDays(from_date, -30);
+    // 60-day lookback for closed invoices to capture long-term boardings
+    const windowStart = addDays(from_date, -60);
     const windowEnd   = addDays(to_date, 1);
     const futureEnd   = addDays(to_date, 90);
 
@@ -230,24 +209,6 @@ module.exports = async function handler(req, res) {
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
     ) / 100;
 
-    // Debug: inspect items[] and detailed_payments for tx containing key 6010
-    let debugOut = {};
-    if (req.query.debug === 'true') {
-      let txSample = null;
-      for (const tx of transactions) {
-        if (tx?.payment_items?.['6010']) { txSample = tx; break; }
-      }
-      if (txSample) {
-        debugOut = {
-          items: txSample.items,
-          detailed_payments: txSample.detailed_payments,
-          payment_info: txSample.payment_info,
-        };
-      } else {
-        debugOut = { error: 'tx with key 6010 not found' };
-      }
-    }
-
     return res.status(200).json({
       success: true,
       facility, facilityName: config.name, from_date, to_date,
@@ -255,7 +216,6 @@ module.exports = async function handler(req, res) {
       invoice_count: matched_invoices,
       totals,
       net_total: net_with_refunds,
-      ...debugOut,
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
