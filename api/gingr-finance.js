@@ -6,10 +6,10 @@
 //   - Lookback window: 60 days to catch long-term boardings whose deposits pre-date 30 days
 
 const FACILITIES = {
-  how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
-  rw:  { subdomain: process.env.RW_SUBDOMAIN,  key: process.env.RW_API_KEY,  name: 'Riverwalk' },
-  fpi: { subdomain: process.env.FPI_SUBDOMAIN, key: process.env.FPI_API_KEY, name: 'Four Paws Inn' },
-  dd:  { subdomain: process.env.DD_SUBDOMAIN,  key: process.env.DD_API_KEY,  name: 'Don Doggos' },
+  how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof', defaultCardProc: 'cardconnect' },
+  rw:  { subdomain: process.env.RW_SUBDOMAIN,  key: process.env.RW_API_KEY,  name: 'Riverwalk',  defaultCardProc: 'gingr_payments' },
+  fpi: { subdomain: process.env.FPI_SUBDOMAIN, key: process.env.FPI_API_KEY, name: 'Four Paws Inn', defaultCardProc: 'gingr_payments' },
+  dd:  { subdomain: process.env.DD_SUBDOMAIN,  key: process.env.DD_API_KEY,  name: 'Don Doggos',  defaultCardProc: 'gingr_payments' },
 };
 
 const PER_PAGE = 100;
@@ -74,7 +74,7 @@ async function batchFetch(subdomain, key, ids) {
   return results;
 }
 
-function categorize(item) {
+function categorize(item, defaultCardProc = 'cardconnect') {
   const type = (item.payment_method_type || '').toLowerCase().trim();
   const proc = (item.processor || '').toLowerCase().trim();
   if (type === 'no payment' || item.zero_payment === '1') return null;
@@ -89,7 +89,7 @@ function categorize(item) {
   if (type.includes('helcim')) return 'helcim';
   if (type.includes('cardconnect')) return 'cardconnect';
   if (type.includes('gingr payment')) return 'gingr_payments';
-  if (type === 'credit card') return 'credit_card';
+  if (type === 'credit card') return defaultCardProc;
   return 'other';
 }
 
@@ -139,7 +139,7 @@ function getItemsToProcess(tx) {
   return items;
 }
 
-function aggregate(transactions, from_date, to_date) {
+function aggregate(transactions, from_date, to_date, defaultCardProc = 'cardconnect') {
   const t = {
     cardconnect: 0, helcim: 0, gingr_payments: 0,
     cash: 0, check: 0, store_credit: 0, credit_card: 0,
@@ -168,7 +168,7 @@ function aggregate(transactions, from_date, to_date) {
         continue;
       }
 
-      const cat = categorize(item);
+      const cat = categorize(item, defaultCardProc);
       if (cat) t[cat] = (t[cat] || 0) + amount;
     }
 
@@ -203,7 +203,7 @@ module.exports = async function handler(req, res) {
 
     const allIds = [...new Set([...closedIds, ...openIds])];
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
-    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date);
+    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date, config.defaultCardProc || 'cardconnect');
 
     const net_with_refunds = Math.round(
       Object.values(totals).reduce((a, b) => a + b, 0) * 100
