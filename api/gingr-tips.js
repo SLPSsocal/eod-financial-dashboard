@@ -71,28 +71,21 @@ module.exports = async function handler(req, res) {
 
     let total_tips = 0;
     let refunded_tips = 0;
-    const debugSample = [];
+    // Debug: first 2 with non-empty tip array + first 1 empty for structure comparison
+    const withTips = [];
+    const noTips = [];
 
     for (const tx of transactions) {
       if (!tx) continue;
-      const tip = parseFloat(tx.tip_amount || 0);
-      const refund = parseFloat(tx.tip_refund || 0);
-      if (tip > 0) total_tips += tip;
-      if (refund > 0) refunded_tips += refund;
+      const tipArr    = Array.isArray(tx.tip_amount) ? tx.tip_amount : [];
+      const refundArr = Array.isArray(tx.tip_refund) ? tx.tip_refund : [];
 
-      if (isDebug && debugSample.length < 5) {
-        const nested = tx.transaction || {};
-        const pi = tx.payment_info || {};
-        debugSample.push({
-          tip_amount_raw: tx.tip_amount,
-          tip_refund_raw: tx.tip_refund,
-          nested_tx_keys: Object.keys(nested),
-          nested_tip_amount: nested.tip_amount,
-          nested_gratuity: nested.gratuity,
-          payment_info_keys: Object.keys(pi),
-          payment_info_tip: pi.tip_amount,
-          payment_info_gratuity: pi.gratuity,
-        });
+      for (const t of tipArr)    { const v = parseFloat(t.amount || t.total || t || 0); if (v > 0) total_tips    += v; }
+      for (const t of refundArr) { const v = parseFloat(t.amount || t.total || t || 0); if (v > 0) refunded_tips += v; }
+
+      if (isDebug) {
+        if (tipArr.length > 0 && withTips.length < 2) withTips.push({ tip_amount: tx.tip_amount, tip_refund: tx.tip_refund });
+        if (tipArr.length === 0 && noTips.length < 1) noTips.push({ tip_amount: tx.tip_amount, tip_refund: tx.tip_refund });
       }
     }
 
@@ -103,7 +96,7 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       success: true, facility, facilityName: config.name, from_date, to_date,
       invoices_fetched: ids.length, total_tips, refunded_tips, net_tips,
-      ...(isDebug ? { debugSample } : {}),
+      ...(isDebug ? { withTips, noTips } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
