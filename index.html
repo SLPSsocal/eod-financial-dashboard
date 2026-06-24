@@ -149,7 +149,7 @@
     <div id="empty-msg" style="text-align:center;padding:60px 20px;color:var(--muted);font-size:14px">Select a date and click Load</div>
 
     <!-- Tips Section -->
-    <div class="tips-section" id="tips-section" style="display:none">
+    <div class="tips-section" id="tips-section">
       <div class="tips-header">
         <h2>Tips &amp; Gratuities</h2>
         <div class="tips-controls">
@@ -361,8 +361,6 @@ async function loadEOD() {
   const loaded = results.filter(r => r && r.success).length;
   document.getElementById('status-text').textContent = loaded + '/4 facilities loaded';
   btn.disabled = false;
-  document.getElementById('tips-section').style.display = '';
-  loadTips();
 }
 
 async function loadTips() {
@@ -445,6 +443,7 @@ async function loadTrends() {
 }
 
 initDates();
+loadTips();
 </script>
 </body>
 </html>
