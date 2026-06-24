@@ -135,15 +135,9 @@ module.exports = async function handler(req, res) {
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    const windowStart = addDays(from_date, -60);
-    const windowEnd   = addDays(to_date, 1);
-    const futureEnd   = addDays(to_date, 90);
-
-    const [closedIds, openIds] = await Promise.all([
-      fetchInvoiceIds(config.subdomain, config.key, windowStart, windowEnd, { complete: 'true' }),
-      fetchInvoiceIdsSafe(config.subdomain, config.key, windowStart, futureEnd, { complete: 'false' }),
-    ]);
-    const allIds = [...new Set([...closedIds, ...openIds])];
+    // Tips are paid at checkout — use exact date range, no extended lookback needed
+    const windowEnd = addDays(to_date, 1);
+    const allIds = await fetchInvoiceIds(config.subdomain, config.key, from_date, windowEnd, { complete: 'true' });
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
 
     let total_tips = 0;
