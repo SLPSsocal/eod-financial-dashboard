@@ -3,13 +3,13 @@
 //   - Gingr Payments / cash / check: payment_items attributed to payment date (transaction_time)
 //   - Helcim / CardConnect: payment_items attributed to payment date (transaction_time)
 //   - Deposits (deposits field): attributed to COLLECTION DATE (created_at only)
-//   - Lookback window: 60 days to catch long-term boardings whose deposits pre-date 30 days
+//   - Lookback window: 60 days to catch long-term boardings
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof', defaultCardProc: 'cardconnect' },
-  rw:  { subdomain: process.env.RW_SUBDOMAIN,  key: process.env.RW_API_KEY,  name: 'Riverwalk',  defaultCardProc: 'gingr_payments' },
+  rw:  { subdomain: process.env.RW_SUBDOMAIN,  key: process.env.RW_API_KEY,  name: 'Riverwalk',    defaultCardProc: 'gingr_payments' },
   fpi: { subdomain: process.env.FPI_SUBDOMAIN, key: process.env.FPI_API_KEY, name: 'Four Paws Inn', defaultCardProc: 'gingr_payments' },
-  dd:  { subdomain: process.env.DD_SUBDOMAIN,  key: process.env.DD_API_KEY,  name: 'Don Doggos',  defaultCardProc: 'gingr_payments' },
+  dd:  { subdomain: process.env.DD_SUBDOMAIN,  key: process.env.DD_API_KEY,  name: 'Don Doggos',   defaultCardProc: 'gingr_payments' },
 };
 
 const PER_PAGE = 100;
@@ -74,7 +74,7 @@ async function batchFetch(subdomain, key, ids) {
   return results;
 }
 
-function categorize(item, defaultCardProc = 'cardconnect') {
+function categorize(item, defaultCardProc) {
   const type = (item.payment_method_type || '').toLowerCase().trim();
   const proc = (item.processor || '').toLowerCase().trim();
   if (type === 'no payment' || item.zero_payment === '1') return null;
@@ -93,18 +93,15 @@ function categorize(item, defaultCardProc = 'cardconnect') {
   return 'other';
 }
 
-// Normalize a deposit record to the payment_item shape.
-// Rules:
-//  - Only count deposits with a known payment method (skip null/empty)
-//  - Only use created_at (when deposit was COLLECTED from client)
-//  - Skip cancelled, forfeited, or fully refunded deposits
+// Only count deposits with known payment method, collected today (created_at).
+// Deposits with consumed_at are ALREADY in payment_items — do not double-count.
+// check_out_stamp is the reservation checkout time, NOT a payment date — skip it.
 function normalizeDeposit(dep) {
   const method = (dep.payment_method || dep.payment_method_type || dep.type || '').trim();
   if (!method) return null;
   if (dep.cancel_stamp || dep.forfeited_at) return null;
   if (parseFloat(dep.refund_amount || 0) >= parseFloat(dep.deposit_amount || dep.paid_amount || 1)) return null;
   if (!dep.created_at) return null;
-
   const isRefund = parseFloat(dep.refund_amount || 0) > 0 || !!dep.refunded_at;
   return {
     payment_method_type: method,
@@ -131,50 +128,33 @@ function getItemsToProcess(tx) {
   }
   if (tx.payment_items && typeof tx.payment_items === 'object') {
     for (const [key, item] of Object.entries(tx.payment_items)) {
-      if (!depositPaymentIds.has(String(key))) {
-        items.push(item);
-      }
+      if (!depositPaymentIds.has(String(key))) items.push(item);
     }
   }
   return items;
 }
 
-function aggregate(transactions, from_date, to_date, defaultCardProc = 'cardconnect') {
-  const t = {
-    cardconnect: 0, helcim: 0, gingr_payments: 0,
-    cash: 0, check: 0, store_credit: 0, credit_card: 0,
-    other: 0, refunds: 0,
-  };
+function aggregate(transactions, from_date, to_date, defaultCardProc) {
+  const t = { cardconnect: 0, helcim: 0, gingr_payments: 0, cash: 0, check: 0, store_credit: 0, credit_card: 0, other: 0, refunds: 0 };
   let matched_invoices = 0;
-
   for (const tx of transactions) {
     if (!tx) continue;
     const items = getItemsToProcess(tx);
     let invoiceMatched = false;
-
     for (const item of items) {
       const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
       if (!ts) continue;
       const payDate = tsToPacificDate(ts);
       if (payDate < from_date || payDate > to_date) continue;
-
       invoiceMatched = true;
       const amount = parseFloat(item.total_balance || 0);
-      if (!amount) continue;
-      if (item.zero_payment === '1') continue;
-
-      if (item.payment_allocation_refund === '1') {
-        t.refunds -= amount;
-        continue;
-      }
-
+      if (!amount || item.zero_payment === '1') continue;
+      if (item.payment_allocation_refund === '1') { t.refunds -= amount; continue; }
       const cat = categorize(item, defaultCardProc);
       if (cat) t[cat] = (t[cat] || 0) + amount;
     }
-
     if (invoiceMatched) matched_invoices++;
   }
-
   return { totals: t, matched_invoices };
 }
 
@@ -191,31 +171,21 @@ module.exports = async function handler(req, res) {
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    // 60-day lookback for closed invoices to capture long-term boardings
     const windowStart = addDays(from_date, -60);
     const windowEnd   = addDays(to_date, 1);
     const futureEnd   = addDays(to_date, 90);
-
     const [closedIds, openIds] = await Promise.all([
       fetchInvoiceIds(config.subdomain, config.key, windowStart, windowEnd, { complete: 'true' }),
       fetchInvoiceIdsSafe(config.subdomain, config.key, windowStart, futureEnd, { complete: 'false' }),
     ]);
-
     const allIds = [...new Set([...closedIds, ...openIds])];
     const transactions = await batchFetch(config.subdomain, config.key, allIds);
-    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date, config.defaultCardProc || 'cardconnect');
-
-    const net_with_refunds = Math.round(
-      Object.values(totals).reduce((a, b) => a + b, 0) * 100
-    ) / 100;
-
+    const { totals, matched_invoices } = aggregate(transactions, from_date, to_date, config.defaultCardProc);
+    const net_with_refunds = Math.round(Object.values(totals).reduce((a, b) => a + b, 0) * 100) / 100;
     return res.status(200).json({
-      success: true,
-      facility, facilityName: config.name, from_date, to_date,
-      invoices_fetched: allIds.length,
-      invoice_count: matched_invoices,
-      totals,
-      net_total: net_with_refunds,
+      success: true, facility, facilityName: config.name, from_date, to_date,
+      invoices_fetched: allIds.length, invoice_count: matched_invoices,
+      totals, net_total: net_with_refunds,
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
