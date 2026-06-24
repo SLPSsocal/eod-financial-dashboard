@@ -1,6 +1,6 @@
 // Gingr Tips/Gratuity Proxy - EOD Financial Dashboard
-// Tips attribution: payment date (transaction_time on payment_items)
-// Also checks tx.gratuity (top-level) and tx.items[].gratuity_amount
+// Gingr stores tips in tx.tip_amount and tx.tip_refund (top-level transaction fields).
+// We fetch completed invoices for the exact date range — no extended lookback needed.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -11,17 +11,11 @@ const FACILITIES = {
 
 const PER_PAGE = 100;
 const CONCURRENCY = 30;
-const PACIFIC_OFFSET_HOURS = -7;
 
 function addDays(dateStr, n) {
   const d = new Date(dateStr + 'T12:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().split('T')[0];
-}
-
-function tsToPacificDate(ts) {
-  const epochMs = (parseInt(ts, 10) + PACIFIC_OFFSET_HOURS * 3600) * 1000;
-  return new Date(epochMs).toISOString().split('T')[0];
 }
 
 async function fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams = {}) {
@@ -45,10 +39,6 @@ async function fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams =
   return all;
 }
 
-async function fetchInvoiceIdsSafe(subdomain, key, from_date, to_date, extraParams = {}) {
-  try { return await fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams); } catch { return []; }
-}
-
 async function fetchTransaction(subdomain, key, id) {
   const params = new URLSearchParams({ key, id });
   const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/transaction?${params}`);
@@ -67,114 +57,34 @@ async function batchFetch(subdomain, key, ids) {
   return results;
 }
 
-function extractTipsFromTx(tx, from_date, to_date) {
-  const found = [];
-
-  // Strategy 1: payment_items where payment_method_type contains 'gratuity' or 'tip'
-  if (tx.payment_items && typeof tx.payment_items === 'object') {
-    for (const [, item] of Object.entries(tx.payment_items)) {
-      const type = (item.payment_method_type || '').toLowerCase();
-      if (!type.includes('gratuity') && !type.includes('tip')) continue;
-      const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
-      if (!ts) continue;
-      const payDate = tsToPacificDate(ts);
-      if (payDate < from_date || payDate > to_date) continue;
-      const amount = parseFloat(item.total_balance || 0);
-      if (!amount) continue;
-      const isRefund = item.payment_allocation_refund === '1';
-      found.push({ amount, isRefund, source: 'payment_items', method: item.payment_method_type });
-    }
-  }
-
-  // Strategy 2: tx.gratuity top-level field
-  if (tx.gratuity && parseFloat(tx.gratuity) > 0) {
-    const ts = parseInt(tx.create_stamp || tx.transaction_time || 0, 10);
-    if (ts) {
-      const payDate = tsToPacificDate(ts);
-      if (payDate >= from_date && payDate <= to_date) {
-        found.push({ amount: parseFloat(tx.gratuity), isRefund: false, source: 'tx.gratuity' });
-      }
-    }
-  }
-
-  // Strategy 3: items[].gratuity_amount (service line items)
-  const itemsSrc = tx.items;
-  if (itemsSrc) {
-    const itemsArr = Array.isArray(itemsSrc) ? itemsSrc : Object.values(itemsSrc);
-    for (const item of itemsArr) {
-      const ga = parseFloat(item.gratuity_amount || 0);
-      if (!ga) continue;
-      const ts = parseInt(item.create_stamp || item.transaction_time || tx.create_stamp || 0, 10);
-      if (!ts) continue;
-      const payDate = tsToPacificDate(ts);
-      if (payDate < from_date || payDate > to_date) continue;
-      found.push({
-        amount: ga,
-        isRefund: false,
-        source: 'items.gratuity_amount',
-        staffId: item.employee_id || null,
-        staffName: item.employee_name || null,
-      });
-    }
-  }
-
-  return found;
-}
-
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { facility, from_date, to_date, debug } = req.query;
-  const isDebug = debug === 'true';
+  const { facility, from_date, to_date } = req.query;
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    // Tips are paid at checkout — use exact date range, no extended lookback needed
+    // Fetch only completed invoices in the exact date range (tips paid at checkout)
     const windowEnd = addDays(to_date, 1);
-    const allIds = await fetchInvoiceIds(config.subdomain, config.key, from_date, windowEnd, { complete: 'true' });
-    const transactions = await batchFetch(config.subdomain, config.key, allIds);
+    const ids = await fetchInvoiceIds(config.subdomain, config.key, from_date, windowEnd, { complete: 'true' });
+    const transactions = await batchFetch(config.subdomain, config.key, ids);
 
     let total_tips = 0;
     let refunded_tips = 0;
-    let tip_count = 0;
-    const debugItems = [];
-    const debugSampleKeys = [];
 
     for (const tx of transactions) {
       if (!tx) continue;
-
-      if (isDebug && debugSampleKeys.length < 3) {
-        const itemsSrc = tx.items;
-        const itemsArr = itemsSrc ? (Array.isArray(itemsSrc) ? itemsSrc : Object.values(itemsSrc)) : [];
-        debugSampleKeys.push({
-          tx_id: tx.id,
-          tx_keys: Object.keys(tx),
-          has_gratuity_field: 'gratuity' in tx,
-          gratuity_value: tx.gratuity,
-          payment_item_types: tx.payment_items
-            ? [...new Set(Object.values(tx.payment_items).map(p => p.payment_method_type))]
-            : [],
-          item_sample_keys: itemsArr[0] ? Object.keys(itemsArr[0]) : [],
-          item_gratuity_sample: itemsArr[0] ? itemsArr[0].gratuity_amount : undefined,
-        });
-      }
-
-      const tips = extractTipsFromTx(tx, from_date, to_date);
-      for (const tip of tips) {
-        if (tip.isRefund) {
-          refunded_tips += tip.amount;
-        } else {
-          total_tips += tip.amount;
-          tip_count++;
-        }
-        if (isDebug) debugItems.push(tip);
-      }
+      // Gingr stores tips in top-level tip_amount / tip_refund fields
+      const tip = parseFloat(tx.tip_amount || 0);
+      const refund = parseFloat(tx.tip_refund || 0);
+      if (tip > 0) total_tips += tip;
+      if (refund > 0) refunded_tips += refund;
     }
 
     total_tips    = Math.round(total_tips    * 100) / 100;
@@ -187,12 +97,10 @@ module.exports = async function handler(req, res) {
       facilityName: config.name,
       from_date,
       to_date,
-      invoices_fetched: allIds.length,
-      tip_count,
+      invoices_fetched: ids.length,
       total_tips,
       refunded_tips,
       net_tips,
-      ...(isDebug ? { debugTips: debugItems, debugSampleKeys } : {}),
     });
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
