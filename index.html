@@ -30,6 +30,8 @@
   .btn { padding: 7px 20px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; background: var(--how); color: #fff; transition: opacity 0.15s; }
   .btn:hover { opacity: 0.85; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-secondary { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-size: 13px; font-weight: 500; background: transparent; color: var(--muted); text-decoration: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-secondary:hover { border-color: var(--how); color: var(--how); }
   .main { padding: 24px; }
   .page { display: none; }
   .page.active { display: block; }
@@ -56,28 +58,6 @@
   .chart-wrap h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
-  /* Tips section */
-  .tips-section { margin-top: 28px; }
-  .tips-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
-  .tips-header h2 { font-size: 15px; font-weight: 600; color: var(--text); }
-  .tips-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .tips-controls label { font-size: 12px; color: var(--muted); }
-  .tips-controls input[type="date"] { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 6px; font-size: 12px; }
-  .btn-sm { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; background: #2a2d3a; color: var(--text); transition: background 0.15s; }
-  .btn-sm:hover { background: #353848; }
-  .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
-  .tips-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .tips-table th, .tips-table td { padding: 10px 16px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; }
-  .tips-table th:first-child, .tips-table td:first-child { text-align: left; color: var(--muted); font-weight: 500; }
-  .tips-table thead th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #12141e; }
-  .tips-table thead th.col-how { color: var(--how); }
-  .tips-table thead th.col-rw  { color: var(--rw); }
-  .tips-table thead th.col-fpi { color: var(--fpi); }
-  .tips-table thead th.col-dd  { color: var(--dd); }
-  .tips-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; font-weight: 700; font-size: 14px; padding-top: 12px; padding-bottom: 12px; }
-  .tips-table td.zero { color: #3a3f50; }
-  .tips-table td.negative { color: #ef4444; }
-  .tips-note { font-size: 11px; color: var(--muted); margin-top: 8px; padding: 0 2px; }
   @media (max-width: 600px) {
     .header { padding: 12px 16px; }
     .header h1 { font-size: 15px; }
@@ -86,7 +66,6 @@
     .eod-table th, .eod-table td { padding: 9px 12px; font-size: 13px; }
     .eod-table th:first-child, .eod-table td:first-child { padding-right: 20px; }
     .eod-table tfoot td { font-size: 13px; }
-    .tips-table th, .tips-table td { padding: 8px 10px; font-size: 12px; }
   }
 </style>
 </head>
@@ -96,6 +75,10 @@
     <h1>EOD Financial Dashboard</h1>
     <div class="subtitle">House of Woof &middot; Riverwalk &middot; Four Paws Inn &middot; Don Doggos</div>
   </div>
+  <a href="https://volume-dashboard-dun.vercel.app/" target="_blank" class="btn-secondary">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+    Volume Dashboard
+  </a>
   <div class="tabs">
     <button class="tab active" onclick="switchTab('eod')">EOD Report</button>
     <button class="tab" onclick="switchTab('trends')">Trends</button>
@@ -111,8 +94,6 @@
 
 <div class="main">
   <div class="page active" id="page-eod">
-
-    <!-- Revenue Table -->
     <div class="table-wrap" id="table-wrap" style="display:none">
       <table class="eod-table">
         <thead>
@@ -147,66 +128,7 @@
       </table>
     </div>
     <div id="empty-msg" style="text-align:center;padding:60px 20px;color:var(--muted);font-size:14px">Select a date and click Load</div>
-
-    <!-- Tips Section -->
-    <div class="tips-section" id="tips-section">
-      <div class="tips-header">
-        <h2>Tips &amp; Gratuities</h2>
-        <div class="tips-controls">
-          <label>From</label>
-          <input type="date" id="tips-from">
-          <label>To</label>
-          <input type="date" id="tips-to">
-          <button class="btn-sm" id="tips-btn" onclick="loadTips()">Load Tips</button>
-          <span id="tips-status" style="font-size:11px;color:var(--muted)"></span>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table class="tips-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th class="col-how">HOW</th>
-              <th class="col-rw">Riverwalk</th>
-              <th class="col-fpi">FPI</th>
-              <th class="col-dd">Don Doggos</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Collected</td>
-              <td id="tips-how" class="zero">&mdash;</td>
-              <td id="tips-rw" class="zero">&mdash;</td>
-              <td id="tips-fpi" class="zero">&mdash;</td>
-              <td id="tips-dd" class="zero">&mdash;</td>
-              <td id="tips-total" class="zero">&mdash;</td>
-            </tr>
-            <tr>
-              <td>Refunded</td>
-              <td id="refund-how" class="zero">&mdash;</td>
-              <td id="refund-rw" class="zero">&mdash;</td>
-              <td id="refund-fpi" class="zero">&mdash;</td>
-              <td id="refund-dd" class="zero">&mdash;</td>
-              <td id="refund-total" class="zero">&mdash;</td>
-            </tr>
-          </tbody>
-          <tfoot>
-            <tr>
-              <td>Net Tips</td>
-              <td id="nettips-how">&mdash;</td>
-              <td id="nettips-rw">&mdash;</td>
-              <td id="nettips-fpi">&mdash;</td>
-              <td id="nettips-dd">&mdash;</td>
-              <td id="nettips-total">&mdash;</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      <p class="tips-note" id="tips-note"></p>
-    </div>
-
-  </div><!-- /page-eod -->
+  </div>
 
   <div class="page" id="page-trends">
     <div class="card" style="margin-bottom:16px">
@@ -228,7 +150,6 @@
     <div class="chart-wrap"><h3>Payment Method Breakdown</h3><canvas id="breakdown-chart" height="280"></canvas></div>
   </div>
 </div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 const FACILITIES = [
@@ -245,30 +166,23 @@ const PAYMENT_ROWS = [
   { key: 'cash',           label: 'Cash',           color: '#22c55e' },
   { key: 'check',          label: 'Check',          color: '#f59e0b' },
   { key: 'store_credit',   label: 'Store Credit',   color: '#06b6d4' },
+  { key: 'credit_card',    label: 'Credit Card',    color: '#a78bfa' },
   { key: 'refunds',        label: 'Refunds',        color: '#ef4444' },
   { key: 'other',          label: 'Other',          color: '#94a3b8' },
 ];
 
 const cache = {};
-let totalInv = 0;
 
 function fmt(n) {
-  if (!n) return '<span class="zero">-<\/span>';
+  if (!n) return '<span class="zero">-</span>';
   const neg = n < 0;
   const s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return neg ? '<span class="negative">-' + s + '<\/span>' : s;
+  return neg ? '<span class="negative">-' + s + '</span>' : s;
 }
 
 function fmtNet(n, color) {
   const s = '$' + Math.abs(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return '<span style="color:' + color + '">' + ((n < 0 ? '-' : '') + s) + '<\/span>';
-}
-
-function fmtTip(n) {
-  if (n === null || n === undefined) return '<span class="zero">&mdash;<\/span>';
-  const neg = n < 0;
-  const s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return neg ? '<span class="negative">-' + s + '<\/span>' : (n === 0 ? '<span class="zero">$0.00<\/span>' : s);
+  return '<span style="color:' + color + '">' + ((n < 0 ? '-' : '') + s) + '</span>';
 }
 
 function switchTab(tab) {
@@ -279,13 +193,10 @@ function switchTab(tab) {
 function initDates() {
   const today = new Date();
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-  const yStr = yesterday.toISOString().split('T')[0];
-  document.getElementById('eod-date').value = yStr;
-  document.getElementById('tips-from').value = yStr;
-  document.getElementById('tips-to').value = yStr;
+  document.getElementById('eod-date').value = yesterday.toISOString().split('T')[0];
   const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
   document.getElementById('trend-from').value = monthAgo.toISOString().split('T')[0];
-  document.getElementById('trend-to').value = yStr;
+  document.getElementById('trend-to').value = yesterday.toISOString().split('T')[0];
 }
 
 async function apiFetch(facility, from_date, to_date) {
@@ -297,19 +208,10 @@ async function apiFetch(facility, from_date, to_date) {
   return data;
 }
 
-async function tipsFetch(facility, from_date, to_date) {
-  const k = 'tips|' + facility + '|' + from_date + '|' + to_date;
-  if (cache[k]) return cache[k];
-  const res = await fetch('/api/gingr-tips?facility=' + facility + '&from_date=' + from_date + '&to_date=' + to_date);
-  const data = await res.json();
-  if (data.success) cache[k] = data;
-  return data;
-}
-
 function setLoading() {
   document.getElementById('eod-tbody').innerHTML = PAYMENT_ROWS.map(row =>
-    '<tr><td><span class="row-label-dot" style="background:' + row.color + '"><\/span>' + row.label + '<\/td>' +
-    '<td colspan="4" style="color:var(--muted);font-style:italic"><span class="spinner"><\/span>Loading...<\/td><td>&mdash;<\/td><\/tr>'
+    '<tr><td><span class="row-label-dot" style="background:' + row.color + '"></span>' + row.label + '</td>' +
+    '<td colspan="4" style="color:var(--muted);font-style:italic"><span class="spinner"></span>Loading...</td><td>&mdash;</td></tr>'
   ).join('');
   ['how','rw','fpi','dd','total'].forEach(k => {
     document.getElementById('inv-' + k).innerHTML = '&mdash;';
@@ -318,21 +220,11 @@ function setLoading() {
   document.getElementById('table-wrap').style.display = '';
   document.getElementById('empty-msg').style.display = 'none';
 }
-
 function renderTable(results) {
   const tbody = document.getElementById('eod-tbody');
+  const rows = PAYMENT_ROWS;
   document.getElementById('inv-total').textContent = totalInv + ' inv.';
-  tbody.innerHTML = PAYMENT_ROWS.map(row => {
-    let rowTotal = 0;
-    const cells = FACILITIES.map((fac, i) => {
-      const r = results[i];
-      const v = r && r.success ? (r.totals[row.key] || 0) : null;
-      if (v !== null) rowTotal += v;
-      return '<td>' + (v !== null ? fmt(v) : '&mdash;') + '<\/td>';
-    });
-    return '<tr><td><span class="row-label-dot" style="background:' + row.color + '"><\/span>' + row.label + '<\/td>' +
-      cells.join('') + '<td>' + fmt(rowTotal) + '<\/td><\/tr>';
-  }).join('');
+
   let grandTotal = 0;
   FACILITIES.forEach((fac, i) => {
     const r = results[i];
@@ -350,62 +242,12 @@ async function loadEOD() {
   btn.disabled = true;
   document.getElementById('status-text').textContent = 'Loading...';
   setLoading();
-  document.getElementById('tips-from').value = date;
-  document.getElementById('tips-to').value = date;
-  totalInv = 0;
   const results = await Promise.all(
     FACILITIES.map(f => apiFetch(f.key, date, date).catch(e => ({ success: false, error: e.message })))
   );
-  results.forEach(r => { if (r && r.success) totalInv += (r.invoice_count || 0); });
   renderTable(results);
   const loaded = results.filter(r => r && r.success).length;
   document.getElementById('status-text').textContent = loaded + '/4 facilities loaded';
-  btn.disabled = false;
-}
-
-async function loadTips() {
-  const from = document.getElementById('tips-from').value;
-  const to   = document.getElementById('tips-to').value;
-  if (!from || !to) return;
-  const btn = document.getElementById('tips-btn');
-  btn.disabled = true;
-  document.getElementById('tips-status').textContent = 'Loading...';
-  ['how','rw','fpi','dd'].forEach(k => {
-    ['tips','refund','nettips'].forEach(p => {
-      document.getElementById(p + '-' + k).innerHTML = '<span class="spinner"><\/span>';
-    });
-  });
-  const results = await Promise.all(
-    FACILITIES.map(f => tipsFetch(f.key, from, to).catch(e => ({ success: false, error: e.message })))
-  );
-  let totalCollected = 0, totalRefunded = 0, totalNet = 0;
-  let anySuccess = false;
-  FACILITIES.forEach((fac, i) => {
-    const r = results[i];
-    if (r && r.success) {
-      anySuccess = true;
-      totalCollected += r.total_tips || 0;
-      totalRefunded  += r.refunded_tips || 0;
-      totalNet       += r.net_tips || 0;
-      document.getElementById('tips-'    + fac.key).innerHTML = fmtTip(r.total_tips || 0);
-      document.getElementById('refund-'  + fac.key).innerHTML = fmtTip(r.refunded_tips ? -r.refunded_tips : 0);
-      document.getElementById('nettips-' + fac.key).innerHTML = fmtTip(r.net_tips || 0);
-    } else {
-      ['tips','refund','nettips'].forEach(p => {
-        document.getElementById(p + '-' + fac.key).innerHTML = '<span style="color:#ef4444;font-size:11px">err<\/span>';
-      });
-    }
-  });
-  document.getElementById('tips-total').innerHTML    = fmtTip(totalCollected);
-  document.getElementById('refund-total').innerHTML  = fmtTip(totalRefunded ? -totalRefunded : 0);
-  document.getElementById('nettips-total').innerHTML = fmtTip(totalNet);
-  const loaded = results.filter(r => r && r.success).length;
-  document.getElementById('tips-status').textContent = loaded + '/4 loaded';
-  if (anySuccess && totalCollected === 0) {
-    document.getElementById('tips-note').textContent = 'No tips found. If expected, check the Gingr tips report for this period to compare.';
-  } else {
-    document.getElementById('tips-note').textContent = '';
-  }
   btn.disabled = false;
 }
 
