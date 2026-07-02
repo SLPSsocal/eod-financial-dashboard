@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EOD Financial Dashboard</title>
+<title>EOD Paisa</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -18,28 +18,27 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
-  .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
-  .header h1 { font-size: 18px; font-weight: 600; }
-  .header .subtitle { font-size: 13px; color: var(--muted); }
-  .tabs { display: flex; gap: 2px; margin-left: auto; }
-  .tab { padding: 6px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; background: transparent; color: var(--muted); transition: all 0.15s; }
+  .header { background: var(--card); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
+  .header h1 { font-size: 16px; font-weight: 700; white-space: nowrap; }
+  .tabs { display: flex; gap: 2px; margin-left: auto; flex-shrink: 0; }
+  .tab { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; background: transparent; color: var(--muted); transition: all 0.15s; white-space: nowrap; }
   .tab.active { background: #4f8ef720; color: var(--how); }
-  .controls { padding: 16px 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
+  .controls { padding: 14px 20px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--border); }
   .controls label { font-size: 13px; color: var(--muted); }
   .controls input[type="date"] { background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 7px 12px; border-radius: 6px; font-size: 13px; }
   .btn { padding: 7px 20px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; background: var(--how); color: #fff; transition: opacity 0.15s; }
   .btn:hover { opacity: 0.85; }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-secondary { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-size: 13px; font-weight: 500; background: transparent; color: var(--muted); text-decoration: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
+  .btn-secondary { padding: 5px 11px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-size: 12px; font-weight: 500; background: transparent; color: var(--muted); text-decoration: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex-shrink: 0; }
   .btn-secondary:hover { border-color: var(--how); color: var(--how); }
-  .main { padding: 24px; }
+  .main { padding: 20px; }
   .page { display: none; }
   .page.active { display: block; }
   .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .eod-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .eod-table th, .eod-table td { padding: 11px 18px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .eod-table th:first-child, .eod-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); width: 1px; white-space: nowrap; padding-right: 28px; }
-  .eod-table thead th { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #12141e; padding-top: 14px; padding-bottom: 14px; }
+  .eod-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .eod-table th, .eod-table td { padding: 10px 14px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .eod-table th:first-child, .eod-table td:first-child { text-align: left; font-weight: 500; color: var(--muted); width: 1px; white-space: nowrap; padding-right: 24px; }
+  .eod-table thead th { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: #12141e; padding-top: 12px; padding-bottom: 12px; }
   .eod-table thead th.col-how { color: var(--how); }
   .eod-table thead th.col-rw  { color: var(--rw); }
   .eod-table thead th.col-fpi { color: var(--fpi); }
@@ -49,35 +48,23 @@
   .eod-table td.zero { color: #3a3f50; }
   .eod-table td.negative { color: #ef4444; }
   .eod-table td { font-variant-numeric: tabular-nums; }
-  .eod-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; font-weight: 700; font-size: 15px; padding-top: 14px; padding-bottom: 14px; }
+  .eod-table tfoot td { border-top: 2px solid var(--border); border-bottom: none; font-weight: 700; font-size: 14px; padding-top: 12px; padding-bottom: 12px; }
   .eod-table tfoot td:first-child { color: var(--text); }
-  .eod-table .inv-row td { font-size: 11px; color: var(--muted); border-bottom: 2px solid var(--border); padding-top: 5px; padding-bottom: 10px; }
-  .row-label-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
-  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 16px; }
-  .chart-wrap h3 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+  .eod-table .inv-row td { font-size: 11px; color: var(--muted); border-bottom: 2px solid var(--border); padding-top: 5px; padding-bottom: 8px; }
+  .row-label-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 7px; vertical-align: middle; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .chart-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .chart-wrap h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
-  @media (max-width: 600px) {
-    .header { padding: 12px 16px; }
-    .header h1 { font-size: 15px; }
-    .controls { padding: 12px 16px; }
-    .main { padding: 12px 16px; }
-    .eod-table th, .eod-table td { padding: 9px 12px; font-size: 13px; }
-    .eod-table th:first-child, .eod-table td:first-child { padding-right: 20px; }
-    .eod-table tfoot td { font-size: 13px; }
-  }
+  .spinner { width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 5px; }
 </style>
 </head>
 <body>
 <div class="header">
-  <div>
-    <h1>EOD Financial Dashboard</h1>
-    <div class="subtitle">House of Woof &middot; Riverwalk &middot; Four Paws Inn &middot; Don Doggos</div>
-  </div>
+  <h1>EOD Paisa</h1>
   <a href="https://volume-dashboard-dun.vercel.app/" target="_blank" class="btn-secondary">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
-    Volume Dashboard
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+    Volume
   </a>
   <div class="tabs">
     <button class="tab active" onclick="switchTab('eod')">EOD Report</button>
@@ -100,9 +87,9 @@
           <tr>
             <th>Payment Method</th>
             <th class="col-how">HOW</th>
-            <th class="col-rw">Riverwalk</th>
+            <th class="col-rw">RW</th>
             <th class="col-fpi">FPI</th>
-            <th class="col-dd">Don Doggos</th>
+            <th class="col-dd">DD</th>
             <th class="col-total">Total</th>
           </tr>
           <tr class="inv-row">
@@ -132,7 +119,7 @@
 
   <div class="page" id="page-trends">
     <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <label style="font-size:13px;color:var(--muted)">From</label>
         <input type="date" id="trend-from" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
         <label style="font-size:13px;color:var(--muted)">To</label>
@@ -153,10 +140,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 const FACILITIES = [
-  { key: 'how', name: 'House of Woof', color: '#4f8ef7' },
-  { key: 'rw',  name: 'Riverwalk',     color: '#22c55e' },
-  { key: 'fpi', name: 'Four Paws Inn', color: '#f59e0b' },
-  { key: 'dd',  name: 'Don Doggos',    color: '#ec4899' },
+  { key: 'how', name: 'HOW',  color: '#4f8ef7' },
+  { key: 'rw',  name: 'RW',   color: '#22c55e' },
+  { key: 'fpi', name: 'FPI',  color: '#f59e0b' },
+  { key: 'dd',  name: 'DD',   color: '#ec4899' },
 ];
 
 const PAYMENT_ROWS = [
@@ -174,7 +161,8 @@ const PAYMENT_ROWS = [
 const cache = {};
 
 function fmt(n) {
-  if (!n) return '<span class="zero">-</span>';
+  if (!n && n !== 0) return '<span class="zero">-</span>';
+  if (n === 0) return '<span class="zero">-</span>';
   const neg = n < 0;
   const s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return neg ? '<span class="negative">-' + s + '</span>' : s;
@@ -220,15 +208,35 @@ function setLoading() {
   document.getElementById('table-wrap').style.display = '';
   document.getElementById('empty-msg').style.display = 'none';
 }
-function renderTable(results) {
-  const tbody = document.getElementById('eod-tbody');
-  const rows = PAYMENT_ROWS;
-  document.getElementById('inv-total').textContent = totalInv + ' inv.';
 
+function renderTable(results) {
+  // Invoice counts
+  let totalInv = 0;
+  FACILITIES.forEach((fac, i) => {
+    const r = results[i];
+    const inv = (r && r.success) ? (r.invoice_count || r.invoices_fetched || r.count || 0) : 0;
+    totalInv += inv;
+    document.getElementById('inv-' + fac.key).textContent = inv ? inv + ' inv.' : '—';
+  });
+  document.getElementById('inv-total').textContent = totalInv ? totalInv + ' inv.' : '—';
+
+  // Payment method rows
+  document.getElementById('eod-tbody').innerHTML = PAYMENT_ROWS.map(row => {
+    let rowTotal = 0;
+    const cells = FACILITIES.map((fac, i) => {
+      const r = results[i];
+      const val = (r && r.success && r.totals) ? (r.totals[row.key] || 0) : null;
+      if (val !== null) rowTotal += val;
+      return '<td>' + (val !== null ? fmt(val) : '&mdash;') + '</td>';
+    }).join('');
+    return '<tr><td><span class="row-label-dot" style="background:' + row.color + '"></span>' + row.label + '</td>' + cells + '<td>' + fmt(rowTotal) + '</td></tr>';
+  }).join('');
+
+  // Net totals
   let grandTotal = 0;
   FACILITIES.forEach((fac, i) => {
     const r = results[i];
-    const net = r && r.success ? (r.net_total || 0) : null;
+    const net = (r && r.success) ? (r.net_total || 0) : null;
     document.getElementById('net-' + fac.key).innerHTML = net !== null ? fmtNet(net, fac.color) : '&mdash;';
     if (net !== null) grandTotal += net;
   });
@@ -242,12 +250,16 @@ async function loadEOD() {
   btn.disabled = true;
   document.getElementById('status-text').textContent = 'Loading...';
   setLoading();
-  const results = await Promise.all(
-    FACILITIES.map(f => apiFetch(f.key, date, date).catch(e => ({ success: false, error: e.message })))
-  );
-  renderTable(results);
-  const loaded = results.filter(r => r && r.success).length;
-  document.getElementById('status-text').textContent = loaded + '/4 facilities loaded';
+  try {
+    const results = await Promise.all(
+      FACILITIES.map(f => apiFetch(f.key, date, date).catch(e => ({ success: false, error: e.message })))
+    );
+    renderTable(results);
+    const loaded = results.filter(r => r && r.success).length;
+    document.getElementById('status-text').textContent = loaded + '/4 loaded';
+  } catch(e) {
+    document.getElementById('status-text').textContent = 'Error: ' + e.message;
+  }
   btn.disabled = false;
 }
 
