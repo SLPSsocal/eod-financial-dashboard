@@ -191,7 +191,45 @@ module.exports = async function handler(req, res) {
       net_total: net_with_refunds,
     };
 
-    if (debugOut) response.debug_items = debugOut;
+    if (debug === 'true') {
+      // Scan ALL transactions for tip/gratuity-related data
+      const allPaymentTypes = new Set();
+      const tipFields = {};
+      const txTopLevelKeys = new Set();
+
+      for (const tx of transactions) {
+        if (!tx) continue;
+        // Collect top-level tx keys (from first tx only, to see structure)
+        Object.keys(tx).forEach(k => txTopLevelKeys.add(k));
+
+        // Scan top-level tx for tip/gratuity fields
+        for (const [k, v] of Object.entries(tx)) {
+          if (k.toLowerCase().includes('tip') || k.toLowerCase().includes('grat')) {
+            if (!tipFields[k]) tipFields[k] = [];
+            if (v && tipFields[k].length < 5) tipFields[k].push(v);
+          }
+        }
+
+        // Collect all payment_method_type values
+        for (const item of Object.values(tx.payment_items || {})) {
+          if (item.payment_method_type) allPaymentTypes.add(item.payment_method_type);
+          // Scan payment item fields for tip/gratuity
+          for (const [k, v] of Object.entries(item)) {
+            if (k.toLowerCase().includes('tip') || k.toLowerCase().includes('grat')) {
+              const key = 'item.' + k;
+              if (!tipFields[key]) tipFields[key] = [];
+              if (v && tipFields[key].length < 5) tipFields[key].push(v);
+            }
+          }
+        }
+      }
+
+      response.debug_items = debugOut;
+      response.all_payment_types = [...allPaymentTypes].sort();
+      response.tip_fields_found = tipFields;
+      response.tx_top_level_keys = [...txTopLevelKeys].sort();
+      response.sample_tx = transactions.find(tx => tx?.payment_items && Object.keys(tx.payment_items).length > 0) || null;
+    }
 
     return res.status(200).json(response);
   } catch (err) {
