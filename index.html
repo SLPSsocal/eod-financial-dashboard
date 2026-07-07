@@ -115,6 +115,43 @@
       </table>
     </div>
     <div id="empty-msg" style="text-align:center;padding:60px 20px;color:var(--muted);font-size:14px">Select a date and click Load</div>
+
+    <!-- Tips Section -->
+    <div style="margin-top:24px">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:0 2px">
+        <span style="font-size:13px;font-weight:700;color:var(--text);letter-spacing:0.02em">TIPS</span>
+        <label style="font-size:13px;color:var(--muted)">From</label>
+        <input type="date" id="tips-from" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:6px;font-size:13px">
+        <label style="font-size:13px;color:var(--muted)">To</label>
+        <input type="date" id="tips-to" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:6px;font-size:13px">
+        <button class="btn" id="tips-btn" onclick="loadTips()">Load Tips</button>
+        <span id="tips-status" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+      <div class="table-wrap" id="tips-table-wrap">
+        <table class="eod-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th class="col-how">HOW</th>
+              <th class="col-rw">RW</th>
+              <th class="col-fpi">FPI</th>
+              <th class="col-dd">DD</th>
+              <th class="col-total">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="row-label-dot" style="background:#f59e0b"></span>Gratuities</td>
+              <td id="tips-how">&mdash;</td>
+              <td id="tips-rw">&mdash;</td>
+              <td id="tips-fpi">&mdash;</td>
+              <td id="tips-dd">&mdash;</td>
+              <td id="tips-total">&mdash;</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <div class="page" id="page-trends">
@@ -185,6 +222,8 @@ function initDates() {
   const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
   document.getElementById('trend-from').value = monthAgo.toISOString().split('T')[0];
   document.getElementById('trend-to').value = yesterday.toISOString().split('T')[0];
+  document.getElementById('tips-from').value = yesterday.toISOString().split('T')[0];
+  document.getElementById('tips-to').value = yesterday.toISOString().split('T')[0];
 }
 
 async function apiFetch(facility, from_date, to_date) {
@@ -294,6 +333,47 @@ async function loadTrends() {
     data: { labels: pmLabels, datasets: [{ data: pmData, backgroundColor: pmColors, borderColor: '#1a1d27', borderWidth: 2 }] },
     options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0', padding: 16 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } } }
   });
+}
+
+const tipsCache = {};
+
+async function tipsFetch(facility, from_date, to_date) {
+  const k = 'tips|' + facility + '|' + from_date + '|' + to_date;
+  if (tipsCache[k]) return tipsCache[k];
+  const res = await fetch('/api/gingr-tips?facility=' + facility + '&from_date=' + from_date + '&to_date=' + to_date);
+  const data = await res.json();
+  if (data.success) tipsCache[k] = data;
+  return data;
+}
+
+async function loadTips() {
+  const from = document.getElementById('tips-from').value;
+  const to = document.getElementById('tips-to').value;
+  if (!from || !to) return;
+  const btn = document.getElementById('tips-btn');
+  btn.disabled = true;
+  document.getElementById('tips-status').textContent = 'Loading...';
+  // Reset cells
+  FACILITIES.forEach(fac => { document.getElementById('tips-' + fac.key).innerHTML = '<span class="spinner"></span>'; });
+  document.getElementById('tips-total').innerHTML = '&mdash;';
+  try {
+    const results = await Promise.all(
+      FACILITIES.map(f => tipsFetch(f.key, from, to).catch(e => ({ success: false, error: e.message })))
+    );
+    let grandTotal = 0;
+    FACILITIES.forEach((fac, i) => {
+      const r = results[i];
+      const tips = (r && r.success) ? (r.tips_total || 0) : null;
+      document.getElementById('tips-' + fac.key).innerHTML = tips !== null ? fmtNet(tips, fac.color) : '&mdash;';
+      if (tips !== null) grandTotal += tips;
+    });
+    document.getElementById('tips-total').innerHTML = fmtNet(grandTotal, '#e2e8f0');
+    const loaded = results.filter(r => r && r.success).length;
+    document.getElementById('tips-status').textContent = loaded + '/4 loaded';
+  } catch(e) {
+    document.getElementById('tips-status').textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
 }
 
 initDates();
