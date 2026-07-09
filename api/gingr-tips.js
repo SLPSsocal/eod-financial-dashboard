@@ -1,5 +1,6 @@
-// Gingr Tips/Gratuity Proxy - EOD Financial Dashboard
-// Checks tx.gratuity, items[].gratuity_amount, and payment_items gratuity types
+// Gingr Tips Proxy - EOD Financial Dashboard
+// Reads tx.tip_amount (top-level array on the transaction object).
+// Matches transactions by payment date, sums tip_amount for each matched tx.
 
 const FACILITIES = {
   how: { subdomain: process.env.HOW_SUBDOMAIN, key: process.env.HOW_API_KEY, name: 'House of Woof' },
@@ -9,7 +10,8 @@ const FACILITIES = {
 };
 
 const PER_PAGE = 100;
-const CONCURRENCY = 30;
+const CONCURRENCY = 50;
+const PACIFIC_OFFSET_HOURS = -7;
 
 function addDays(dateStr, n) {
   const d = new Date(dateStr + 'T12:00:00Z');
@@ -17,11 +19,19 @@ function addDays(dateStr, n) {
   return d.toISOString().split('T')[0];
 }
 
-async function fetchInvoiceIds(subdomain, key, from_date, to_date, extraParams = {}) {
+function tsToPacificDate(ts) {
+  const epochMs = (parseInt(ts, 10) + PACIFIC_OFFSET_HOURS * 3600) * 1000;
+  return new Date(epochMs).toISOString().split('T')[0];
+}
+
+async function fetchInvoiceIds(subdomain, key, from_date, to_date) {
   const all = [];
   let pageStart = 1;
   while (true) {
-    const params = new URLSearchParams({ key, from_date, to_date, per_page: String(PER_PAGE), page: String(pageStart), ...extraParams });
+    const params = new URLSearchParams({
+      key, from_date, to_date, complete: 'true',
+      per_page: String(PER_PAGE), page: String(pageStart),
+    });
     const res = await fetch(`https://${subdomain}.gingrapp.com/api/v1/list_invoices?${params}`);
     if (!res.ok) throw new Error(`list_invoices HTTP ${res.status}`);
     const json = await res.json();
@@ -52,37 +62,31 @@ async function batchFetch(subdomain, key, ids) {
   return results;
 }
 
-function extractTips(tx) {
-  let tips = 0, refunds = 0;
-
-  // Strategy 1: tx.gratuity top-level field
-  const g = parseFloat(tx.gratuity || 0);
-  if (g > 0) tips += g;
-
-  // Strategy 2: items[].gratuity_amount
-  const itemsSrc = tx.items;
-  if (itemsSrc) {
-    const itemsArr = Array.isArray(itemsSrc) ? itemsSrc : Object.values(itemsSrc);
-    for (const item of itemsArr) {
-      const ga = parseFloat(item.gratuity_amount || 0);
-      if (ga > 0) tips += ga;
+// Extract numeric tip total from tx.tip_amount (a top-level array).
+// Handles: [], [number], [{tip_amount:"5.00",...}], [{amount:"5.00",...}]
+function extractTip(tx) {
+  const arr = tx.tip_amount;
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  let total = 0;
+  for (const item of arr) {
+    if (typeof item === 'number') total += item;
+    else if (typeof item === 'string') total += parseFloat(item) || 0;
+    else if (item && typeof item === 'object') {
+      total += parseFloat(item.tip_amount || item.amount || item.value || 0);
     }
   }
+  return total;
+}
 
-  // Strategy 3: payment_items where type contains 'gratuity' or 'tip'
-  if (tx.payment_items && typeof tx.payment_items === 'object') {
-    for (const item of Object.values(tx.payment_items)) {
-      const type = (item.payment_method_type || '').toLowerCase();
-      if (!type.includes('gratuity') && !type.includes('tip')) continue;
-      const amount = parseFloat(item.total_balance || 0);
-      if (amount > 0) {
-        if (item.payment_allocation_refund === '1') refunds += amount;
-        else tips += amount;
-      }
-    }
+// True if any payment item falls in [from_date, to_date] (Pacific time)
+function txInDateRange(tx, from_date, to_date) {
+  for (const item of Object.values(tx.payment_items || {})) {
+    const ts = parseInt(item.transaction_time || item.create_stamp || 0, 10);
+    if (!ts) continue;
+    const d = tsToPacificDate(ts);
+    if (d >= from_date && d <= to_date) return true;
   }
-
-  return { tips, refunds };
+  return false;
 }
 
 module.exports = async function handler(req, res) {
@@ -92,56 +96,49 @@ module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { facility, from_date, to_date, debug } = req.query;
-  const isDebug = debug === 'true';
   const config = FACILITIES[facility?.toLowerCase()];
   if (!config) return res.status(400).json({ success: false, error: `Unknown facility "${facility}"` });
   if (!config.key || !config.subdomain) return res.status(500).json({ success: false, error: `Env vars not set for "${facility}"` });
   if (!from_date || !to_date) return res.status(400).json({ success: false, error: 'from_date and to_date required' });
 
   try {
-    const windowEnd = addDays(to_date, 1);
-    const ids = await fetchInvoiceIds(config.subdomain, config.key, from_date, windowEnd, { complete: 'true' });
+    const windowStart = addDays(from_date, -60);
+    const windowEnd   = addDays(to_date, 60);
+
+    const ids = await fetchInvoiceIds(config.subdomain, config.key, windowStart, windowEnd);
     const transactions = await batchFetch(config.subdomain, config.key, ids);
 
-    let total_tips = 0;
-    let refunded_tips = 0;
-    const debugSamples = [];
+    let tips_total = 0;
+    let matched = 0;
+    const debugItems = debug === 'true' ? [] : null;
+    const nonEmptyRaw = debug === 'true' ? [] : null;
 
     for (const tx of transactions) {
-      if (!tx) continue;
+      if (!tx || !txInDateRange(tx, from_date, to_date)) continue;
+      matched++;
+      const tip = extractTip(tx);
+      tips_total += tip;
 
-      if (isDebug && debugSamples.length < 3) {
-        const itemsSrc = tx.items;
-        const itemsArr = itemsSrc ? (Array.isArray(itemsSrc) ? itemsSrc : Object.values(itemsSrc)) : [];
-        const firstItem = itemsArr[0] || {};
-        debugSamples.push({
-          tx_keys: Object.keys(tx),
-          gratuity: tx.gratuity,
-          tip_amount: tx.tip_amount,
-          detailed_payments: tx.detailed_payments,
-          payment_item_types: tx.payment_items
-            ? [...new Set(Object.values(tx.payment_items).map(p => p.payment_method_type))]
-            : [],
-          first_item_keys: Object.keys(firstItem),
-          first_item_gratuity_amount: firstItem.gratuity_amount,
-          first_item_modifiers: firstItem.modifiers,
-        });
+      if (nonEmptyRaw && Array.isArray(tx.tip_amount) && tx.tip_amount.length > 0 && nonEmptyRaw.length < 5) {
+        nonEmptyRaw.push({ invoice_id: tx.transaction?.id, tip_amount: tx.tip_amount, tip_refund: tx.tip_refund, tip_extracted: tip });
       }
-
-      const { tips, refunds } = extractTips(tx);
-      total_tips += tips;
-      refunded_tips += refunds;
+      if (debugItems && tip > 0) {
+        debugItems.push({ invoice_id: tx.transaction?.id, tip_amount_raw: tx.tip_amount, tip_extracted: tip });
+      }
     }
 
-    total_tips    = Math.round(total_tips    * 100) / 100;
-    refunded_tips = Math.round(refunded_tips * 100) / 100;
-    const net_tips = Math.round((total_tips - refunded_tips) * 100) / 100;
+    tips_total = Math.round(tips_total * 100) / 100;
 
-    return res.status(200).json({
+    const response = {
       success: true, facility, facilityName: config.name, from_date, to_date,
-      invoices_fetched: ids.length, total_tips, refunded_tips, net_tips,
-      ...(isDebug ? { debugSamples } : {}),
-    });
+      invoices_fetched: ids.length, invoices_matched: matched, tips_total,
+    };
+    if (debug === 'true') {
+      response.debug_tips_with_value = debugItems;
+      response.sample_nonempty_tip_amount = nonEmptyRaw;
+    }
+
+    return res.status(200).json(response);
   } catch (err) {
     return res.status(502).json({ success: false, error: err.message });
   }
