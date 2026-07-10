@@ -235,7 +235,7 @@ async function apiFetch(facility, from_date, to_date) {
   if (cache[k]) return cache[k];
   const res = await fetch('/api/gingr-finance?facility=' + facility + '&from_date=' + from_date + '&to_date=' + to_date);
   const data = await res.json();
-  if (data.success) cache[k] = data;
+  if (data.success) { data._fetchedAt = Date.now(); cache[k] = data; }
   return data;
 }
 
@@ -286,11 +286,10 @@ function renderTable(results) {
   document.getElementById('net-total').innerHTML = fmtNet(grandTotal, '#e2e8f0');
 }
 
-function pacificNow() {
-  // Returns current time in PDT (UTC-7). Returns { dateStr, hour24 }
-  const now = new Date();
-  const pdtMs = now.getTime() + (-7 * 3600 * 1000) - (now.getTimezoneOffset() * 60 * 1000);
-  const pdt = new Date(pdtMs);
+function pacificNow(ts) {
+  // Convert a UTC timestamp (ms) to PDT (UTC-7). Uses Date.now() if not provided.
+  const utcMs = ts || Date.now();
+  const pdt = new Date(utcMs - 7 * 3600 * 1000);
   const dateStr = pdt.toISOString().split('T')[0];
   const h = pdt.getUTCHours(), m = pdt.getUTCMinutes();
   const ampm = h >= 12 ? 'PM' : 'AM';
@@ -313,10 +312,14 @@ async function loadEOD() {
     );
     renderTable(results);
     const loaded = results.filter(r => r && r.success).length;
-    const { dateStr, hour24, timeLabel } = pacificNow();
+    // Use the earliest fetch timestamp across all facilities (reflects actual data age)
+    const fetchTimes = results.map(r => r && r._fetchedAt).filter(Boolean);
+    const dataTs = fetchTimes.length ? Math.min(...fetchTimes) : Date.now();
+    const { dateStr, hour24, timeLabel } = pacificNow(dataTs);
+    const nowPdt = pacificNow();
     document.getElementById('status-text').textContent = loaded + '/4 loaded · Data as of ' + timeLabel;
-    // Warn if selected date is today and it's before 7 PM PDT
-    if (date === dateStr && hour24 < 19) {
+    // Warn if selected date is today and data was fetched before 7 PM PDT
+    if (date === nowPdt.dateStr && hour24 < 19) {
       document.getElementById('eod-warning').style.display = '';
     }
   } catch(e) {
