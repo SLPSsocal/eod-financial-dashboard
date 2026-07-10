@@ -57,6 +57,7 @@
   .chart-wrap h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--how); border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; margin-right: 5px; }
+  .eod-warning { background: #78350f22; border: 1px solid #f59e0b55; border-radius: 8px; padding: 9px 14px; font-size: 12px; color: #f59e0b; display: flex; align-items: center; gap: 8px; margin: 0 0 16px 0; }
 </style>
 </head>
 <body>
@@ -81,6 +82,9 @@
 
 <div class="main">
   <div class="page active" id="page-eod">
+    <div class="eod-warning" id="eod-warning" style="display:none">
+      ⚠️ Data may be incomplete — for a full day load after 7 PM PDT
+    </div>
     <div class="table-wrap" id="table-wrap" style="display:none">
       <table class="eod-table">
         <thead>
@@ -282,12 +286,26 @@ function renderTable(results) {
   document.getElementById('net-total').innerHTML = fmtNet(grandTotal, '#e2e8f0');
 }
 
+function pacificNow() {
+  // Returns current time in PDT (UTC-7). Returns { dateStr, hour24 }
+  const now = new Date();
+  const pdtMs = now.getTime() + (-7 * 3600 * 1000) - (now.getTimezoneOffset() * 60 * 1000);
+  const pdt = new Date(pdtMs);
+  const dateStr = pdt.toISOString().split('T')[0];
+  const h = pdt.getUTCHours(), m = pdt.getUTCMinutes();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  const timeLabel = h12 + ':' + String(m).padStart(2, '0') + ' ' + ampm + ' PDT';
+  return { dateStr, hour24: h, timeLabel };
+}
+
 async function loadEOD() {
   const date = document.getElementById('eod-date').value;
   if (!date) return;
   const btn = document.getElementById('load-btn');
   btn.disabled = true;
   document.getElementById('status-text').textContent = 'Loading...';
+  document.getElementById('eod-warning').style.display = 'none';
   setLoading();
   try {
     const results = await Promise.all(
@@ -295,7 +313,12 @@ async function loadEOD() {
     );
     renderTable(results);
     const loaded = results.filter(r => r && r.success).length;
-    document.getElementById('status-text').textContent = loaded + '/4 loaded';
+    const { dateStr, hour24, timeLabel } = pacificNow();
+    document.getElementById('status-text').textContent = loaded + '/4 loaded · Data as of ' + timeLabel;
+    // Warn if selected date is today and it's before 7 PM PDT
+    if (date === dateStr && hour24 < 19) {
+      document.getElementById('eod-warning').style.display = '';
+    }
   } catch(e) {
     document.getElementById('status-text').textContent = 'Error: ' + e.message;
   }
