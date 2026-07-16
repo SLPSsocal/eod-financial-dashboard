@@ -228,9 +228,9 @@ function initDates() {
   const today = new Date();
   const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
   document.getElementById('eod-date').value = yesterday.toISOString().split('T')[0];
-  const monthAgo = new Date(today); monthAgo.setDate(monthAgo.getDate() - 30);
-  document.getElementById('trend-from').value = monthAgo.toISOString().split('T')[0];
-  document.getElementById('trend-to').value = yesterday.toISOString().split('T')[0];
+  const startOfYear = new Date(Date.UTC(today.getFullYear(), 0, 1));
+  document.getElementById('trend-from').value = startOfYear.toISOString().split('T')[0];
+  document.getElementById('trend-to').value = today.toISOString().split('T')[0];
   document.getElementById('tips-from').value = yesterday.toISOString().split('T')[0];
   document.getElementById('tips-to').value = yesterday.toISOString().split('T')[0];
 }
@@ -393,7 +393,7 @@ async function loadTrends() {
   trendChart = new Chart(document.getElementById('trend-chart'), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Net Revenue', data: netData, backgroundColor: fac.color + '90', borderColor: fac.color, borderWidth: 1 }] },
-    options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } }, scales: { x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4' } }, y: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } } } }
+    options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } }, scales: { x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4' } }, y: { beginAtZero: true, grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } } } }
   });
 
   const agg = {};
