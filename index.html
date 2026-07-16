@@ -171,7 +171,12 @@
           <option value="fpi">Four Paws Inn</option>
           <option value="dd">Don Doggos</option>
         </select>
-        <button class="btn" onclick="loadTrends()">Load Trends</button>
+        <select id="trend-group" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px">
+          <option value="month">Monthly</option>
+          <option value="week">Weekly</option>
+        </select>
+        <button class="btn" id="trend-btn" onclick="loadTrends()">Load Trends</button>
+        <span id="trend-status" style="font-size:12px;color:var(--muted)"></span>
       </div>
     </div>
     <div class="chart-wrap"><h3>Daily Net Revenue</h3><canvas id="trend-chart" height="280"></canvas></div>
@@ -330,27 +335,69 @@ async function loadEOD() {
 
 let trendChart = null, breakdownChart = null;
 
+function getMonthRanges(from, to) {
+  const ranges = [];
+  const end = new Date(to + 'T12:00:00Z');
+  let cur = new Date(from + 'T12:00:00Z');
+  while (cur <= end) {
+    const y = cur.getUTCFullYear(), m = cur.getUTCMonth();
+    const first = new Date(Date.UTC(y, m, 1));
+    const last  = new Date(Date.UTC(y, m + 1, 0));
+    ranges.push({
+      from:  first.toISOString().split('T')[0],
+      to:    (last > end ? end : last).toISOString().split('T')[0],
+      label: first.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' }),
+    });
+    cur = new Date(Date.UTC(y, m + 1, 1));
+  }
+  return ranges;
+}
+
+function getWeekRanges(from, to) {
+  const ranges = [];
+  const end = new Date(to + 'T12:00:00Z');
+  let cur = new Date(from + 'T12:00:00Z');
+  while (cur <= end) {
+    const weekEnd = new Date(Math.min(cur.getTime() + 6 * 86400000, end.getTime()));
+    ranges.push({
+      from:  cur.toISOString().split('T')[0],
+      to:    weekEnd.toISOString().split('T')[0],
+      label: cur.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+    });
+    cur = new Date(weekEnd.getTime() + 86400000);
+  }
+  return ranges;
+}
+
 async function loadTrends() {
   const from = document.getElementById('trend-from').value;
   const to = document.getElementById('trend-to').value;
   const facility = document.getElementById('trend-facility').value;
+  const group = document.getElementById('trend-group').value;
   if (!from || !to) return;
-  const days = [];
-  const cur = new Date(from + 'T12:00:00Z');
-  const end = new Date(to + 'T12:00:00Z');
-  while (cur <= end) { days.push(cur.toISOString().split('T')[0]); cur.setUTCDate(cur.getUTCDate() + 1); }
-  const results = await Promise.all(days.map(d => apiFetch(facility, d, d).catch(() => null)));
-  const labels = days.map(d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }));
+
+  const btn = document.getElementById('trend-btn');
+  btn.disabled = true;
+  const ranges = group === 'month' ? getMonthRanges(from, to) : getWeekRanges(from, to);
+  document.getElementById('trend-status').textContent = 'Loading ' + ranges.length + ' ' + (group === 'month' ? 'months' : 'weeks') + '...';
+
+  const results = await Promise.all(
+    ranges.map(r => apiFetch(facility, r.from, r.to).catch(() => null))
+  );
+
+  const labels  = ranges.map(r => r.label);
   const netData = results.map(r => (r && r.net_total) || 0);
   const fac = FACILITIES.find(f => f.key === facility);
+
   if (trendChart) trendChart.destroy();
   trendChart = new Chart(document.getElementById('trend-chart'), {
     type: 'bar',
     data: { labels, datasets: [{ label: 'Net Revenue', data: netData, backgroundColor: fac.color + '90', borderColor: fac.color, borderWidth: 1 }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', maxRotation: 45 } }, y: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } } } }
+    options: { responsive: true, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } }, scales: { x: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4' } }, y: { grid: { color: '#2a2d3a' }, ticks: { color: '#8892a4', callback: v => '$' + v.toLocaleString() } } } }
   });
+
   const agg = {};
-  for (const r of results) { if (!r || !r.success) continue; for (const [k,v] of Object.entries(r.totals || {})) agg[k] = (agg[k] || 0) + v; }
+  for (const r of results) { if (!r || !r.success) continue; for (const [k, v] of Object.entries(r.totals || {})) agg[k] = (agg[k] || 0) + v; }
   const pmLabels = [], pmData = [], pmColors = [];
   for (const row of PAYMENT_ROWS) { if (agg[row.key] && agg[row.key] > 0) { pmLabels.push(row.label); pmData.push(Math.abs(agg[row.key])); pmColors.push(row.color); } }
   if (breakdownChart) breakdownChart.destroy();
@@ -359,6 +406,10 @@ async function loadTrends() {
     data: { labels: pmLabels, datasets: [{ data: pmData, backgroundColor: pmColors, borderColor: '#1a1d27', borderWidth: 2 }] },
     options: { responsive: true, plugins: { legend: { labels: { color: '#e2e8f0', padding: 16 } }, tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': $' + ctx.raw.toLocaleString('en-US', { minimumFractionDigits: 2 }) } } } }
   });
+
+  const loaded = results.filter(r => r && r.success).length;
+  document.getElementById('trend-status').textContent = loaded + '/' + ranges.length + ' loaded';
+  btn.disabled = false;
 }
 
 const tipsCache = {};
